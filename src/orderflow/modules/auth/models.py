@@ -1,7 +1,15 @@
 from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
-from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, String, func
+from sqlalchemy import (
+    Boolean,
+    CheckConstraint,
+    DateTime,
+    Enum,
+    ForeignKey,
+    String,
+    func,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from orderflow.infrastructure.database import Base
@@ -14,6 +22,12 @@ def utc_now() -> datetime:
 
 class User(Base):
     __tablename__ = "users"
+    __table_args__ = (
+        CheckConstraint(
+            "role IN ('customer', 'manager', 'admin')",
+            name="user_role",
+        ),
+    )
 
     id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
     email: Mapped[str] = mapped_column(String(320), unique=True, nullable=False)
@@ -23,7 +37,8 @@ class User(Base):
             UserRole,
             name="user_role",
             native_enum=False,
-            create_constraint=True,
+            # Alembic excludes type-bound Enum checks from named CHECK comparison.
+            create_constraint=False,
             values_callable=lambda enum: [item.value for item in enum],
         ),
         default=UserRole.CUSTOMER,

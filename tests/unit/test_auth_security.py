@@ -46,7 +46,9 @@ def test_access_and_refresh_tokens_have_separate_types(test_settings: Settings) 
 def test_tampered_token_is_rejected(test_settings: Settings) -> None:
     tokens = TokenService(test_settings)
     access_token = tokens.create_access_token(uuid4(), UserRole.CUSTOMER)
-    tampered_token = f"{access_token[:-1]}{'a' if access_token[-1] != 'a' else 'b'}"
+    header, payload, signature = access_token.split(".")
+    replacement = "a" if signature[0] != "a" else "b"
+    tampered_token = f"{header}.{payload}.{replacement}{signature[1:]}"
 
     with pytest.raises(TokenDecodeError):
         tokens.decode_access_token(tampered_token)
