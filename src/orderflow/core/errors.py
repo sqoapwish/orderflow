@@ -14,6 +14,7 @@ class ApplicationError(Exception):
     code: str
     message: str
     status_code: int = status.HTTP_400_BAD_REQUEST
+    headers: dict[str, str] | None = None
 
 
 def _error_response(*, code: str, message: str, status_code: int) -> JSONResponse:
@@ -28,7 +29,10 @@ def _error_response(*, code: str, message: str, status_code: int) -> JSONRespons
 
 
 async def application_error_handler(_: Request, exc: ApplicationError) -> JSONResponse:
-    return _error_response(code=exc.code, message=exc.message, status_code=exc.status_code)
+    response = _error_response(code=exc.code, message=exc.message, status_code=exc.status_code)
+    if exc.headers:
+        response.headers.update(exc.headers)
+    return response
 
 
 async def validation_error_handler(_: Request, __: RequestValidationError) -> JSONResponse:
