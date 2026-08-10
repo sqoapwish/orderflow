@@ -1,0 +1,76 @@
+[build-system]
+requires = ["hatchling>=1.27,<2"]
+build-backend = "hatchling.build"
+
+[project]
+name = "orderflow"
+version = "0.1.0"
+description = "Order and inventory management backend with reliable payment workflows"
+readme = "README.md"
+requires-python = ">=3.12,<3.14"
+dependencies = [
+    "aio-pika>=9.5,<10",
+    "alembic>=1.17,<2",
+    "asyncpg>=0.30,<1",
+    "celery>=5.6,<6",
+    "fastapi>=0.140,<1",
+    "greenlet==3.2.4",
+    "pydantic-settings>=2.11,<3",
+    "redis>=7,<8",
+    "sqlalchemy[asyncio]>=2.0.50,<3",
+    "structlog>=25.5,<26",
+    "uvicorn[standard]>=0.40,<1",
+]
+
+[dependency-groups]
+dev = [
+    "asgi-lifespan>=2.1,<3",
+    "httpx>=0.28,<1",
+    "mypy>=1.19,<2",
+    "pytest>=9,<10",
+    "pytest-asyncio>=1.3,<2",
+    "pytest-cov>=7,<8",
+    "ruff>=0.16,<1",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/orderflow"]
+
+[tool.pytest.ini_options]
+addopts = "--strict-config --strict-markers -ra"
+asyncio_mode = "auto"
+testpaths = ["tests"]
+markers = [
+    "integration: requires PostgreSQL, Redis, and RabbitMQ",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "ASYNC", "SIM", "RUF"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["orderflow"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+plugins = ["pydantic.mypy"]
+files = ["src", "tests"]
+warn_unreachable = true
+
+[[tool.mypy.overrides]]
+module = ["celery.*"]
+ignore_missing_imports = true
+
+[tool.coverage.run]
+branch = true
+source = ["orderflow"]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = true
+fail_under = 80
