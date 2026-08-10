@@ -4,7 +4,9 @@ from pydantic import ValidationError
 from orderflow.core.config import Environment, Settings
 
 
-def test_settings_have_safe_local_defaults() -> None:
+def test_settings_have_safe_local_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("ORDERFLOW_ENVIRONMENT", raising=False)
+
     settings = Settings(_env_file=None)
 
     assert settings.environment is Environment.LOCAL
