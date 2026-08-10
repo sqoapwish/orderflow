@@ -1,0 +1,128 @@
+name: orderflow
+
+services:
+  api:
+    build:
+      context: .
+    environment: &app-environment
+      ORDERFLOW_ENVIRONMENT: ${ORDERFLOW_ENVIRONMENT:-local}
+      ORDERFLOW_DEBUG: ${ORDERFLOW_DEBUG:-false}
+      ORDERFLOW_LOG_LEVEL: ${ORDERFLOW_LOG_LEVEL:-INFO}
+      ORDERFLOW_DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-orderflow}:${POSTGRES_PASSWORD:-orderflow_local_password}@db:5432/${POSTGRES_DB:-orderflow}
+      ORDERFLOW_REDIS_URL: redis://redis:6379/0
+      ORDERFLOW_RABBITMQ_URL: amqp://${POSTGRES_USER:-orderflow}:${POSTGRES_PASSWORD:-orderflow_local_password}@rabbitmq:5672//
+    ports:
+      - "${API_PORT:-8002}:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/v1/health/ready', timeout=3)"
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    restart: unless-stopped
+
+  worker:
+    build:
+      context: .
+    entrypoint: []
+    command:
+      - celery
+      - --app=orderflow.workers.celery_app:celery_app
+      - worker
+      - --loglevel=INFO
+    environment: *app-environment
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - "celery --app=orderflow.workers.celery_app:celery_app inspect ping --destination=celery@$$HOSTNAME --timeout=5"
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 20s
+    restart: unless-stopped
+
+  db:
+    image: postgres:17.6-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-orderflow}
+      POSTGRES_USER: ${POSTGRES_USER:-orderflow}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-orderflow_local_password}
+    ports:
+      - "${DB_PORT:-5435}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  redis:
+    image: redis:8.2-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  rabbitmq:
+    image: rabbitmq:4.1-management-alpine
+    environment:
+      RABBITMQ_DEFAULT_USER: ${POSTGRES_USER:-orderflow}
+      RABBITMQ_DEFAULT_PASS: ${POSTGRES_PASSWORD:-orderflow_local_password}
+    ports:
+      - "${RABBITMQ_MANAGEMENT_PORT:-15673}:15672"
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  test-db:
+    image: postgres:17.6-alpine
+    profiles: ["test"]
+    environment:
+      POSTGRES_DB: orderflow_test
+      POSTGRES_USER: orderflow_test
+      POSTGRES_PASSWORD: orderflow_test_password
+    ports:
+      - "${TEST_DB_PORT:-5436}:5432"
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U orderflow_test -d orderflow_test"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  postgres_data:
+  redis_data:
+  rabbitmq_data:
+

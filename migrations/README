@@ -1,0 +1,10 @@
+OrderFlow database migrations are managed by Alembic.
+
+Create a migration after changing SQLAlchemy models:
+
+    uv run alembic revision --autogenerate -m "describe change"
+
+Apply all migrations:
+
+    uv run alembic upgrade head
+
