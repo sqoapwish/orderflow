@@ -11,6 +11,7 @@ services:
       ORDERFLOW_DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-orderflow}:${POSTGRES_PASSWORD:-orderflow_local_password}@db:5432/${POSTGRES_DB:-orderflow}
       ORDERFLOW_REDIS_URL: redis://redis:6379/0
       ORDERFLOW_RABBITMQ_URL: amqp://${POSTGRES_USER:-orderflow}:${POSTGRES_PASSWORD:-orderflow_local_password}@rabbitmq:5672//
+      ORDERFLOW_JWT_SECRET: ${ORDERFLOW_JWT_SECRET:-local-development-jwt-secret-change-me}
     ports:
       - "${API_PORT:-8002}:8000"
     depends_on:
@@ -125,4 +126,3 @@ volumes:
   postgres_data:
   redis_data:
   rabbitmq_data:
-

@@ -32,3 +32,13 @@ def test_settings_reject_debug_in_production() -> None:
 def test_settings_reject_invalid_api_prefix() -> None:
     with pytest.raises(ValidationError, match="must start"):
         Settings(_env_file=None, api_v1_prefix="api/v2")
+
+
+def test_settings_reject_short_jwt_secret() -> None:
+    with pytest.raises(ValidationError, match="at least 32"):
+        Settings(_env_file=None, jwt_secret="short-secret")
+
+
+def test_settings_reject_default_jwt_secret_in_production() -> None:
+    with pytest.raises(ValidationError, match="must not be used in production"):
+        Settings(_env_file=None, environment=Environment.PRODUCTION)

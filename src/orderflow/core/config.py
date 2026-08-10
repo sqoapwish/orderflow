@@ -1,8 +1,10 @@
 from enum import StrEnum
 from typing import Self
 
-from pydantic import Field, field_validator, model_validator
+from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+LOCAL_JWT_SECRET = "local-development-jwt-secret-change-me"
 
 
 class Environment(StrEnum):
@@ -36,6 +38,12 @@ class Settings(BaseSettings):
     rabbitmq_url: str = "amqp://guest:guest@localhost:5672//"
     health_check_timeout_seconds: float = Field(default=2.0, gt=0, le=10)
 
+    jwt_secret: SecretStr = SecretStr(LOCAL_JWT_SECRET)
+    jwt_issuer: str = "orderflow"
+    jwt_audience: str = "orderflow-api"
+    jwt_access_token_ttl_minutes: int = Field(default=15, ge=1, le=60)
+    jwt_refresh_token_ttl_days: int = Field(default=30, ge=1, le=90)
+
     @field_validator("api_v1_prefix")
     @classmethod
     def validate_api_prefix(cls, value: str) -> str:
@@ -52,7 +60,14 @@ class Settings(BaseSettings):
         return normalized
 
     @model_validator(mode="after")
-    def reject_debug_in_production(self) -> Self:
+    def validate_production_security(self) -> Self:
         if self.environment is Environment.PRODUCTION and self.debug:
             raise ValueError("Debug mode must be disabled in production")
+        if (
+            self.environment is Environment.PRODUCTION
+            and self.jwt_secret.get_secret_value() == LOCAL_JWT_SECRET
+        ):
+            raise ValueError("Default JWT secret must not be used in production")
+        if len(self.jwt_secret.get_secret_value()) < 32:
+            raise ValueError("JWT secret must contain at least 32 characters")
         return self
