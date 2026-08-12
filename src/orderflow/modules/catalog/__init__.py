@@ -1,1 +1,1 @@
-"""Catalog module (implemented in stage 3)."""
+"""Categories, products, public discovery, and catalog management."""
