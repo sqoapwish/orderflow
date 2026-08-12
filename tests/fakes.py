@@ -1,3 +1,4 @@
+from collections.abc import Iterable
 from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
@@ -8,8 +9,18 @@ from orderflow.modules.auth.models import RefreshSession, User
 from orderflow.modules.auth.security import PasswordService, TokenService
 from orderflow.modules.auth.service import AuthService
 from orderflow.modules.catalog.domain import ProductFilters, ProductSortField, SortDirection
+from orderflow.modules.catalog.errors import ProductNotFoundError
 from orderflow.modules.catalog.models import Category, Product
 from orderflow.modules.catalog.service import CatalogService
+from orderflow.modules.inventory.domain import MovementFilters, ReservationStatus, StockFilters
+from orderflow.modules.inventory.models import (
+    InventoryMovement,
+    InventoryReservation,
+    StockBalance,
+    Warehouse,
+)
+from orderflow.modules.inventory.repository import StockKey
+from orderflow.modules.inventory.service import InventoryService
 
 
 class FakeAuthRepository:
@@ -228,3 +239,182 @@ class FakeCatalogRepository:
 def build_catalog_service() -> tuple[CatalogService, FakeCatalogRepository]:
     repository = FakeCatalogRepository()
     return CatalogService(repository), repository
+
+
+class FakeProductAvailability:
+    def __init__(self) -> None:
+        self.product_ids: set[UUID] = set()
+        self.active_product_ids: set[UUID] = set()
+
+    async def require_active_product_for_inventory(self, product_id: UUID) -> None:
+        if product_id not in self.active_product_ids:
+            raise ProductNotFoundError
+
+    async def require_product_for_inventory(self, product_id: UUID) -> None:
+        if product_id not in self.product_ids:
+            raise ProductNotFoundError
+
+
+class FakeInventoryRepository:
+    def __init__(self) -> None:
+        self.warehouses: dict[UUID, Warehouse] = {}
+        self.balances: dict[StockKey, StockBalance] = {}
+        self.movements: list[InventoryMovement] = []
+        self.reservations: dict[UUID, InventoryReservation] = {}
+        self.reservations_by_key: dict[str, InventoryReservation] = {}
+        self.reservation_key_locks: list[str] = []
+        self.commits = 0
+        self.rollbacks = 0
+
+    async def list_warehouses(self) -> list[Warehouse]:
+        return sorted(
+            self.warehouses.values(), key=lambda warehouse: (warehouse.name, warehouse.id)
+        )
+
+    async def lock_warehouses(self, warehouse_ids: Iterable[UUID]) -> list[Warehouse]:
+        ids = sorted(set(warehouse_ids), key=lambda warehouse_id: warehouse_id.int)
+        return [
+            self.warehouses[warehouse_id] for warehouse_id in ids if warehouse_id in self.warehouses
+        ]
+
+    async def warehouse_code_exists(
+        self,
+        code: str,
+        exclude_id: UUID | None = None,
+    ) -> bool:
+        return any(
+            warehouse.code == code and warehouse.id != exclude_id
+            for warehouse in self.warehouses.values()
+        )
+
+    async def warehouse_has_inventory(self, warehouse_id: UUID) -> bool:
+        return any(
+            balance.warehouse_id == warehouse_id and (balance.on_hand != 0 or balance.reserved != 0)
+            for balance in self.balances.values()
+        ) or any(
+            reservation.warehouse_id == warehouse_id
+            and reservation.status == ReservationStatus.ACTIVE
+            for reservation in self.reservations.values()
+        )
+
+    def add_warehouse(self, warehouse: Warehouse) -> None:
+        now = datetime.now(UTC)
+        warehouse.id = uuid4()
+        warehouse.created_at = now
+        warehouse.updated_at = now
+        self.warehouses[warehouse.id] = warehouse
+
+    async def lock_stock_balances(
+        self,
+        keys: Iterable[StockKey],
+    ) -> dict[StockKey, StockBalance]:
+        now = datetime.now(UTC)
+        ordered_keys = sorted(set(keys), key=lambda key: (key[0].int, key[1].int))
+        for key in ordered_keys:
+            if key not in self.balances:
+                balance = StockBalance(
+                    id=uuid4(),
+                    warehouse_id=key[0],
+                    product_id=key[1],
+                    on_hand=0,
+                    reserved=0,
+                    created_at=now,
+                    updated_at=now,
+                )
+                self.balances[key] = balance
+        return {key: self.balances[key] for key in ordered_keys}
+
+    async def list_stock_balances(
+        self,
+        filters: StockFilters,
+    ) -> tuple[list[StockBalance], int]:
+        balances = list(self.balances.values())
+        if filters.warehouse_id is not None:
+            balances = [
+                balance for balance in balances if balance.warehouse_id == filters.warehouse_id
+            ]
+        if filters.product_id is not None:
+            balances = [balance for balance in balances if balance.product_id == filters.product_id]
+        balances.sort(key=lambda balance: (balance.warehouse_id, balance.product_id))
+        total = len(balances)
+        start = (filters.page - 1) * filters.page_size
+        return balances[start : start + filters.page_size], total
+
+    def add_movement(self, movement: InventoryMovement) -> None:
+        movement.created_at = datetime.now(UTC)
+        self.movements.append(movement)
+
+    async def list_movements(
+        self,
+        filters: MovementFilters,
+    ) -> tuple[list[InventoryMovement], int]:
+        movements = list(self.movements)
+        if filters.warehouse_id is not None:
+            movements = [
+                movement for movement in movements if movement.warehouse_id == filters.warehouse_id
+            ]
+        if filters.product_id is not None:
+            movements = [
+                movement for movement in movements if movement.product_id == filters.product_id
+            ]
+        if filters.movement_type is not None:
+            movements = [
+                movement
+                for movement in movements
+                if movement.movement_type == filters.movement_type
+            ]
+        if filters.operation_id is not None:
+            movements = [
+                movement for movement in movements if movement.operation_id == filters.operation_id
+            ]
+        movements.sort(key=lambda movement: (movement.created_at, movement.id), reverse=True)
+        total = len(movements)
+        start = (filters.page - 1) * filters.page_size
+        return movements[start : start + filters.page_size], total
+
+    async def acquire_reservation_key_lock(self, reservation_key: str) -> None:
+        self.reservation_key_locks.append(reservation_key)
+
+    async def get_reservation_by_key(
+        self,
+        reservation_key: str,
+    ) -> InventoryReservation | None:
+        return self.reservations_by_key.get(reservation_key)
+
+    async def get_reservation(
+        self,
+        reservation_id: UUID,
+        *,
+        for_update: bool = False,
+    ) -> InventoryReservation | None:
+        return self.reservations.get(reservation_id)
+
+    def add_reservation(self, reservation: InventoryReservation) -> None:
+        now = datetime.now(UTC)
+        reservation.created_at = now
+        reservation.updated_at = now
+        self.reservations[reservation.id] = reservation
+        self.reservations_by_key[reservation.reservation_key] = reservation
+
+    async def flush(self) -> None:
+        return None
+
+    async def commit(self) -> None:
+        self.commits += 1
+
+    async def rollback(self) -> None:
+        self.rollbacks += 1
+
+
+def build_inventory_service(
+    *product_ids: UUID,
+) -> tuple[InventoryService, FakeInventoryRepository, FakeProductAvailability]:
+    repository = FakeInventoryRepository()
+    product_availability = FakeProductAvailability()
+    product_availability.product_ids.update(product_ids)
+    product_availability.active_product_ids.update(product_ids)
+    return (
+        InventoryService(repository, product_availability),
+        repository,
+        product_availability,
+    )

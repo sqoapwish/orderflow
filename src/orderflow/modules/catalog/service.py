@@ -138,6 +138,18 @@ class CatalogService:
             raise ProductNotFoundError
         return product
 
+    async def require_active_product_for_inventory(self, product_id: UUID) -> None:
+        product = await self._repository.get_product(product_id)
+        if product is None or not product.is_active:
+            raise ProductNotFoundError
+        category = await self._repository.get_category(product.category_id)
+        if category is None or not category.is_active:
+            raise ProductNotFoundError
+
+    async def require_product_for_inventory(self, product_id: UUID) -> None:
+        if await self._repository.get_product(product_id) is None:
+            raise ProductNotFoundError
+
     async def create_product(
         self,
         *,
