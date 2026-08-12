@@ -1,3 +1,4 @@
+from collections.abc import Iterable
 from typing import Protocol
 from uuid import UUID
 
@@ -29,6 +30,11 @@ class CatalogRepositoryProtocol(Protocol):
     def add_category(self, category: Category) -> None: ...
 
     async def get_product(self, product_id: UUID) -> Product | None: ...
+
+    async def get_products_with_category_state(
+        self,
+        product_ids: Iterable[UUID],
+    ) -> list[tuple[Product, bool]]: ...
 
     async def get_public_product_by_slug(self, slug: str) -> Product | None: ...
 
@@ -117,6 +123,22 @@ class CatalogRepository:
 
     async def get_product(self, product_id: UUID) -> Product | None:
         return await self._session.get(Product, product_id)
+
+    async def get_products_with_category_state(
+        self,
+        product_ids: Iterable[UUID],
+    ) -> list[tuple[Product, bool]]:
+        ordered_ids = sorted(set(product_ids), key=lambda product_id: product_id.int)
+        if not ordered_ids:
+            return []
+        statement = (
+            select(Product, Category.is_active)
+            .join(Category, Category.id == Product.category_id)
+            .where(Product.id.in_(ordered_ids))
+            .order_by(Product.id)
+        )
+        result = await self._session.execute(statement)
+        return [(product, category_is_active) for product, category_is_active in result.all()]
 
     async def get_public_product_by_slug(self, slug: str) -> Product | None:
         statement = (

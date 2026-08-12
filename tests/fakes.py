@@ -8,6 +8,8 @@ from orderflow.core.config import Settings
 from orderflow.modules.auth.models import RefreshSession, User
 from orderflow.modules.auth.security import PasswordService, TokenService
 from orderflow.modules.auth.service import AuthService
+from orderflow.modules.cart.models import Cart, CartItem
+from orderflow.modules.cart.repository import CartBundle
 from orderflow.modules.catalog.domain import ProductFilters, ProductSortField, SortDirection
 from orderflow.modules.catalog.errors import ProductNotFoundError
 from orderflow.modules.catalog.models import Category, Product
@@ -21,6 +23,9 @@ from orderflow.modules.inventory.models import (
 )
 from orderflow.modules.inventory.repository import StockKey
 from orderflow.modules.inventory.service import InventoryService
+from orderflow.modules.orders.domain import OrderFilters
+from orderflow.modules.orders.models import Order, OrderItem
+from orderflow.modules.orders.repository import OrderBundle
 
 
 class FakeAuthRepository:
@@ -145,6 +150,19 @@ class FakeCatalogRepository:
 
     async def get_product(self, product_id: UUID) -> Product | None:
         return self.products.get(product_id)
+
+    async def get_products_with_category_state(
+        self,
+        product_ids: Iterable[UUID],
+    ) -> list[tuple[Product, bool]]:
+        return [
+            (
+                self.products[product_id],
+                self.categories[self.products[product_id].category_id].is_active,
+            )
+            for product_id in sorted(set(product_ids), key=lambda value: value.int)
+            if product_id in self.products
+        ]
 
     async def get_public_product_by_slug(self, slug: str) -> Product | None:
         return next(
@@ -418,3 +436,171 @@ def build_inventory_service(
         repository,
         product_availability,
     )
+
+
+class FakeCartRepository:
+    def __init__(self) -> None:
+        self.carts_by_customer: dict[UUID, Cart] = {}
+        self.items: dict[UUID, CartItem] = {}
+        self.customer_locks: list[UUID] = []
+        self.commits = 0
+        self.rollbacks = 0
+
+    async def acquire_customer_lock(self, customer_id: UUID) -> None:
+        self.customer_locks.append(customer_id)
+
+    async def get_cart(
+        self,
+        customer_id: UUID,
+        *,
+        for_update: bool = False,
+    ) -> CartBundle:
+        cart = self.carts_by_customer.get(customer_id)
+        if cart is None:
+            return CartBundle(cart=None, items=[])
+        items = sorted(
+            (item for item in self.items.values() if item.cart_id == cart.id),
+            key=lambda item: (item.created_at, item.id),
+        )
+        return CartBundle(cart=cart, items=items)
+
+    async def get_item(
+        self,
+        customer_id: UUID,
+        item_id: UUID,
+        *,
+        for_update: bool = False,
+    ) -> CartItem | None:
+        cart = self.carts_by_customer.get(customer_id)
+        item = self.items.get(item_id)
+        if cart is None or item is None or item.cart_id != cart.id:
+            return None
+        return item
+
+    async def get_item_by_stock(
+        self,
+        cart_id: UUID,
+        product_id: UUID,
+        warehouse_id: UUID,
+        *,
+        for_update: bool = False,
+    ) -> CartItem | None:
+        return next(
+            (
+                item
+                for item in self.items.values()
+                if item.cart_id == cart_id
+                and item.product_id == product_id
+                and item.warehouse_id == warehouse_id
+            ),
+            None,
+        )
+
+    async def count_items(self, cart_id: UUID) -> int:
+        return sum(item.cart_id == cart_id for item in self.items.values())
+
+    def add_cart(self, cart: Cart) -> None:
+        now = datetime.now(UTC)
+        cart.created_at = now
+        cart.updated_at = now
+        self.carts_by_customer[cart.customer_id] = cart
+
+    def add_item(self, item: CartItem) -> None:
+        now = datetime.now(UTC)
+        item.created_at = now
+        item.updated_at = now
+        self.items[item.id] = item
+
+    async def delete_item(self, item: CartItem) -> None:
+        self.items.pop(item.id, None)
+
+    async def clear(self, cart_id: UUID) -> None:
+        self.items = {
+            item_id: item for item_id, item in self.items.items() if item.cart_id != cart_id
+        }
+
+    async def touch(self, cart_id: UUID) -> None:
+        for cart in self.carts_by_customer.values():
+            if cart.id == cart_id:
+                cart.updated_at = datetime.now(UTC)
+                return
+
+    async def flush(self) -> None:
+        return None
+
+    async def commit(self) -> None:
+        self.commits += 1
+
+    async def rollback(self) -> None:
+        self.rollbacks += 1
+
+
+class FakeOrderRepository:
+    def __init__(self) -> None:
+        self.orders: dict[UUID, Order] = {}
+        self.items: dict[UUID, OrderItem] = {}
+        self.idempotency_locks: list[tuple[UUID, str]] = []
+        self.commits = 0
+        self.rollbacks = 0
+
+    async def acquire_idempotency_lock(self, customer_id: UUID, key: str) -> None:
+        self.idempotency_locks.append((customer_id, key))
+
+    async def get_by_idempotency_key(
+        self,
+        customer_id: UUID,
+        key: str,
+    ) -> OrderBundle | None:
+        order = next(
+            (
+                order
+                for order in self.orders.values()
+                if order.customer_id == customer_id and order.idempotency_key == key
+            ),
+            None,
+        )
+        return self._bundle(order) if order else None
+
+    async def get(self, order_id: UUID) -> OrderBundle | None:
+        order = self.orders.get(order_id)
+        return self._bundle(order) if order else None
+
+    async def list_orders(
+        self,
+        filters: OrderFilters,
+    ) -> tuple[list[OrderBundle], int]:
+        orders = list(self.orders.values())
+        if filters.customer_id is not None:
+            orders = [order for order in orders if order.customer_id == filters.customer_id]
+        if filters.status is not None:
+            orders = [order for order in orders if order.status == filters.status]
+        orders.sort(key=lambda order: (order.created_at, order.id), reverse=True)
+        total = len(orders)
+        start = (filters.page - 1) * filters.page_size
+        return [self._bundle(order) for order in orders[start : start + filters.page_size]], total
+
+    def add_order(self, order: Order) -> None:
+        now = datetime.now(UTC)
+        order.created_at = now
+        order.updated_at = now
+        self.orders[order.id] = order
+
+    def add_item(self, item: OrderItem) -> None:
+        item.created_at = datetime.now(UTC)
+        self.items[item.id] = item
+
+    async def flush(self) -> None:
+        return None
+
+    async def commit(self) -> None:
+        self.commits += 1
+
+    async def rollback(self) -> None:
+        self.rollbacks += 1
+
+    def _bundle(self, order: Order) -> OrderBundle:
+        items = sorted(
+            (item for item in self.items.values() if item.order_id == order.id),
+            key=lambda item: (item.created_at, item.id),
+        )
+        return OrderBundle(order=order, items=items)

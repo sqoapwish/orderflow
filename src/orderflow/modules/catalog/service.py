@@ -27,6 +27,12 @@ from orderflow.modules.catalog.repository import CatalogRepositoryProtocol
 
 
 @dataclass(frozen=True, slots=True)
+class ProductDescriptor:
+    product: Product
+    is_available: bool
+
+
+@dataclass(frozen=True, slots=True)
 class ProductPage:
     items: list[Product]
     total: int
@@ -149,6 +155,29 @@ class CatalogService:
     async def require_product_for_inventory(self, product_id: UUID) -> None:
         if await self._repository.get_product(product_id) is None:
             raise ProductNotFoundError
+
+    async def describe_products(
+        self,
+        product_ids: list[UUID],
+    ) -> dict[UUID, ProductDescriptor]:
+        records = await self._repository.get_products_with_category_state(product_ids)
+        return {
+            product.id: ProductDescriptor(
+                product=product,
+                is_available=product.is_active and category_is_active,
+            )
+            for product, category_is_active in records
+        }
+
+    async def lock_orderable_products(self, product_ids: list[UUID]) -> dict[UUID, Product]:
+        expected = set(product_ids)
+        await self._repository.acquire_catalog_write_lock()
+        descriptors = await self.describe_products(list(expected))
+        if set(descriptors) != expected or any(
+            not descriptor.is_available for descriptor in descriptors.values()
+        ):
+            raise ProductNotFoundError
+        return {product_id: descriptor.product for product_id, descriptor in descriptors.items()}
 
     async def create_product(
         self,
