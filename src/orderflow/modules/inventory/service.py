@@ -369,6 +369,7 @@ class InventoryService:
         reservation_id: UUID,
         *,
         actor_id: UUID,
+        commit: bool = True,
     ) -> InventoryReservation:
         reservation = await self._require_locked_reservation(reservation_id)
         if reservation.status == ReservationStatus.RELEASED:
@@ -389,7 +390,7 @@ class InventoryService:
             actor_id=actor_id,
             reservation_id=reservation.id,
         )
-        await self._save()
+        await self._save(commit=commit)
         return reservation
 
     async def consume_reservation(
@@ -397,6 +398,7 @@ class InventoryService:
         reservation_id: UUID,
         *,
         actor_id: UUID,
+        commit: bool = True,
     ) -> InventoryReservation:
         reservation = await self._require_locked_reservation(reservation_id)
         if reservation.status == ReservationStatus.CONSUMED:
@@ -418,7 +420,7 @@ class InventoryService:
             actor_id=actor_id,
             reservation_id=reservation.id,
         )
-        await self._save()
+        await self._save(commit=commit)
         return reservation
 
     async def _prepare_stock_operation(

@@ -14,12 +14,13 @@ from orderflow.modules.inventory.models import (
     Warehouse,
 )
 from orderflow.modules.orders.models import Order, OrderItem
+from orderflow.modules.payments.models import Payment, PaymentRefund, PaymentWebhookEvent
 
 
 def test_alembic_has_exactly_one_head() -> None:
     script = ScriptDirectory.from_config(Config("alembic.ini"))
 
-    assert script.get_heads() == ["20260812_0005"]
+    assert script.get_heads() == ["20260812_0006"]
 
 
 def test_user_role_check_constraint_is_explicit_and_named() -> None:
@@ -146,7 +147,9 @@ def test_cart_and_order_constraints_and_indexes_are_explicit_and_named() -> None
             "char_length(currency) = 3 AND currency = upper(currency)"
         ),
         "ck_orders_order_positive_total": "total_minor > 0",
-        "ck_orders_order_status": "status IN ('pending_payment')",
+        "ck_orders_order_status": (
+            "status IN ('pending_payment', 'paid', 'payment_failed', 'cancelled', 'refunded')"
+        ),
     }
     assert checks(order_item_table) == {
         "ck_order_items_order_item_currency_format": (
@@ -169,3 +172,50 @@ def test_cart_and_order_constraints_and_indexes_are_explicit_and_named() -> None
     assert {index.name for index in order_item_table.indexes} == {
         "ix_order_items_order_created",
     }
+
+
+def test_payment_constraints_and_indexes_are_explicit_and_named() -> None:
+    payment_table = cast(Table, Payment.__table__)
+    event_table = cast(Table, PaymentWebhookEvent.__table__)
+    refund_table = cast(Table, PaymentRefund.__table__)
+
+    def checks(table: Table) -> dict[str, str]:
+        return {
+            str(constraint.name): str(constraint.sqltext)
+            for constraint in table.constraints
+            if isinstance(constraint, CheckConstraint)
+        }
+
+    assert checks(payment_table) == {
+        "ck_payments_payment_currency_format": (
+            "char_length(currency) = 3 AND currency = upper(currency)"
+        ),
+        "ck_payments_payment_positive_amount": "amount_minor > 0",
+        "ck_payments_payment_provider": "provider = 'mock'",
+        "ck_payments_payment_status": (
+            "status IN ('pending', 'succeeded', 'failed', 'cancelled', 'refunded')"
+        ),
+    }
+    assert checks(event_table) == {
+        "ck_payment_webhook_events_payment_webhook_event_type": (
+            "event_type IN ('payment.succeeded', 'payment.failed')"
+        ),
+        "ck_payment_webhook_events_payment_webhook_outcome": (
+            "outcome IN ('processed', 'ignored')"
+        ),
+    }
+    assert checks(refund_table) == {
+        "ck_payment_refunds_payment_refund_currency_format": (
+            "char_length(currency) = 3 AND currency = upper(currency)"
+        ),
+        "ck_payment_refunds_payment_refund_positive_amount": "amount_minor > 0",
+        "ck_payment_refunds_payment_refund_status": "status IN ('succeeded')",
+    }
+    assert {index.name for index in payment_table.indexes} == {
+        "ix_payments_customer_created",
+        "ix_payments_status_created",
+    }
+    assert {index.name for index in event_table.indexes} == {
+        "ix_payment_webhook_events_payment_created",
+    }
+    assert {index.name for index in refund_table.indexes} == set()

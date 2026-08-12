@@ -5,6 +5,7 @@ from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 LOCAL_JWT_SECRET = "local-development-jwt-secret-change-me"
+LOCAL_PAYMENT_WEBHOOK_SECRET = "local-development-payment-webhook-secret-change-me"
 
 
 class Environment(StrEnum):
@@ -44,6 +45,10 @@ class Settings(BaseSettings):
     jwt_access_token_ttl_minutes: int = Field(default=15, ge=1, le=60)
     jwt_refresh_token_ttl_days: int = Field(default=30, ge=1, le=90)
 
+    payment_webhook_secret: SecretStr = SecretStr(LOCAL_PAYMENT_WEBHOOK_SECRET)
+    payment_webhook_tolerance_seconds: int = Field(default=300, ge=30, le=3600)
+    payment_session_ttl_minutes: int = Field(default=30, ge=5, le=1440)
+
     @field_validator("api_v1_prefix")
     @classmethod
     def validate_api_prefix(cls, value: str) -> str:
@@ -70,4 +75,11 @@ class Settings(BaseSettings):
             raise ValueError("Default JWT secret must not be used in production")
         if len(self.jwt_secret.get_secret_value()) < 32:
             raise ValueError("JWT secret must contain at least 32 characters")
+        if (
+            self.environment is Environment.PRODUCTION
+            and self.payment_webhook_secret.get_secret_value() == LOCAL_PAYMENT_WEBHOOK_SECRET
+        ):
+            raise ValueError("Default payment webhook secret must not be used in production")
+        if len(self.payment_webhook_secret.get_secret_value()) < 32:
+            raise ValueError("Payment webhook secret must contain at least 32 characters")
         return self
