@@ -5,6 +5,7 @@ from alembic.script import ScriptDirectory
 from sqlalchemy import CheckConstraint, Enum, Table
 
 from orderflow.modules.auth.models import User
+from orderflow.modules.cart.models import Cart, CartItem
 from orderflow.modules.catalog.models import Category, Product
 from orderflow.modules.inventory.models import (
     InventoryMovement,
@@ -12,12 +13,13 @@ from orderflow.modules.inventory.models import (
     StockBalance,
     Warehouse,
 )
+from orderflow.modules.orders.models import Order, OrderItem
 
 
 def test_alembic_has_exactly_one_head() -> None:
     script = ScriptDirectory.from_config(Config("alembic.ini"))
 
-    assert script.get_heads() == ["20260812_0004"]
+    assert script.get_heads() == ["20260812_0005"]
 
 
 def test_user_role_check_constraint_is_explicit_and_named() -> None:
@@ -119,4 +121,51 @@ def test_inventory_constraints_and_indexes_are_explicit_and_named() -> None:
     assert {index.name for index in movement_table.indexes} == {
         "ix_inventory_movements_operation_id",
         "ix_inventory_movements_stock_created",
+    }
+
+
+def test_cart_and_order_constraints_and_indexes_are_explicit_and_named() -> None:
+    cart_table = cast(Table, Cart.__table__)
+    cart_item_table = cast(Table, CartItem.__table__)
+    order_table = cast(Table, Order.__table__)
+    order_item_table = cast(Table, OrderItem.__table__)
+
+    def checks(table: Table) -> dict[str, str]:
+        return {
+            str(constraint.name): str(constraint.sqltext)
+            for constraint in table.constraints
+            if isinstance(constraint, CheckConstraint)
+        }
+
+    assert checks(cart_table) == {}
+    assert checks(cart_item_table) == {
+        "ck_cart_items_cart_item_positive_quantity": "quantity > 0",
+    }
+    assert checks(order_table) == {
+        "ck_orders_order_currency_format": (
+            "char_length(currency) = 3 AND currency = upper(currency)"
+        ),
+        "ck_orders_order_positive_total": "total_minor > 0",
+        "ck_orders_order_status": "status IN ('pending_payment')",
+    }
+    assert checks(order_item_table) == {
+        "ck_order_items_order_item_currency_format": (
+            "char_length(currency) = 3 AND currency = upper(currency)"
+        ),
+        "ck_order_items_order_item_positive_line_total": "line_total_minor > 0",
+        "ck_order_items_order_item_positive_quantity": "quantity > 0",
+        "ck_order_items_order_item_positive_unit_price": "unit_price_minor > 0",
+        "ck_order_items_order_item_total_matches": (
+            "line_total_minor = unit_price_minor * quantity"
+        ),
+    }
+    assert {index.name for index in cart_item_table.indexes} == {
+        "ix_cart_items_cart_created",
+    }
+    assert {index.name for index in order_table.indexes} == {
+        "ix_orders_customer_created",
+        "ix_orders_status_created",
+    }
+    assert {index.name for index in order_item_table.indexes} == {
+        "ix_order_items_order_created",
     }

@@ -83,6 +83,9 @@ class InventoryService:
     async def list_warehouses(self) -> list[Warehouse]:
         return await self._repository.list_warehouses()
 
+    async def require_active_warehouse(self, warehouse_id: UUID) -> None:
+        await self._lock_warehouses([warehouse_id], require_active=True)
+
     async def create_warehouse(
         self,
         *,
@@ -314,6 +317,7 @@ class InventoryService:
         product_id: UUID,
         quantity: int,
         actor_id: UUID,
+        commit: bool = True,
     ) -> InventoryReservation:
         await self._repository.acquire_reservation_key_lock(reservation_key)
         existing = await self._repository.get_reservation_by_key(reservation_key)
@@ -357,7 +361,7 @@ class InventoryService:
             actor_id=actor_id,
             reservation_id=reservation.id,
         )
-        await self._save()
+        await self._save(commit=commit)
         return reservation
 
     async def release_reservation(
@@ -503,8 +507,10 @@ class InventoryService:
             await self._repository.rollback()
             raise InventoryWriteConflictError from None
 
-    async def _save(self) -> None:
+    async def _save(self, *, commit: bool = True) -> None:
         await self._flush()
+        if not commit:
+            return
         try:
             await self._repository.commit()
         except IntegrityError:
