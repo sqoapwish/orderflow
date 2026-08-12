@@ -37,3 +37,12 @@ class OrderWriteConflictError(ApplicationError):
             message="Order data conflicts with a concurrent or existing record",
             status_code=status.HTTP_409_CONFLICT,
         )
+
+
+class OrderStateConflictError(ApplicationError):
+    def __init__(self, *, current: str, target: str) -> None:
+        super().__init__(
+            code="order_state_conflict",
+            message=f"Order cannot transition from '{current}' to '{target}'",
+            status_code=status.HTTP_409_CONFLICT,
+        )

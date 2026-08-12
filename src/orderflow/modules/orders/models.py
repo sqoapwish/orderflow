@@ -31,7 +31,7 @@ class Order(Base):
             name="order_currency_format",
         ),
         CheckConstraint(
-            "status IN ('pending_payment')",
+            "status IN ('pending_payment', 'paid', 'payment_failed', 'cancelled', 'refunded')",
             name="order_status",
         ),
         UniqueConstraint(

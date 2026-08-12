@@ -12,6 +12,8 @@ def test_settings_have_safe_local_defaults(monkeypatch: pytest.MonkeyPatch) -> N
     assert settings.environment is Environment.LOCAL
     assert settings.debug is False
     assert settings.api_v1_prefix == "/api/v1"
+    assert settings.payment_webhook_tolerance_seconds == 300
+    assert settings.payment_session_ttl_minutes == 30
 
 
 def test_settings_read_prefixed_environment_variables(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -42,3 +44,17 @@ def test_settings_reject_short_jwt_secret() -> None:
 def test_settings_reject_default_jwt_secret_in_production() -> None:
     with pytest.raises(ValidationError, match="must not be used in production"):
         Settings(_env_file=None, environment=Environment.PRODUCTION)
+
+
+def test_settings_reject_short_payment_webhook_secret() -> None:
+    with pytest.raises(ValidationError, match="Payment webhook secret must contain at least 32"):
+        Settings(_env_file=None, payment_webhook_secret="short-secret")
+
+
+def test_settings_reject_default_payment_webhook_secret_in_production() -> None:
+    with pytest.raises(ValidationError, match="payment webhook secret must not be used"):
+        Settings(
+            _env_file=None,
+            environment=Environment.PRODUCTION,
+            jwt_secret="production-jwt-secret-that-is-long-enough",
+        )

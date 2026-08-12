@@ -26,6 +26,9 @@ from orderflow.modules.inventory.service import InventoryService
 from orderflow.modules.orders.domain import OrderFilters
 from orderflow.modules.orders.models import Order, OrderItem
 from orderflow.modules.orders.repository import OrderBundle
+from orderflow.modules.payments.domain import PaymentFilters
+from orderflow.modules.payments.models import Payment, PaymentRefund, PaymentWebhookEvent
+from orderflow.modules.payments.repository import PaymentBundle
 
 
 class FakeAuthRepository:
@@ -561,7 +564,12 @@ class FakeOrderRepository:
         )
         return self._bundle(order) if order else None
 
-    async def get(self, order_id: UUID) -> OrderBundle | None:
+    async def get(
+        self,
+        order_id: UUID,
+        *,
+        for_update: bool = False,
+    ) -> OrderBundle | None:
         order = self.orders.get(order_id)
         return self._bundle(order) if order else None
 
@@ -604,3 +612,126 @@ class FakeOrderRepository:
             key=lambda item: (item.created_at, item.id),
         )
         return OrderBundle(order=order, items=items)
+
+
+class FakePaymentRepository:
+    def __init__(self) -> None:
+        self.payments: dict[UUID, Payment] = {}
+        self.events: dict[str, PaymentWebhookEvent] = {}
+        self.refunds: dict[UUID, PaymentRefund] = {}
+        self.session_locks: list[tuple[UUID, str]] = []
+        self.event_locks: list[str] = []
+        self.refund_locks: list[UUID] = []
+        self.commits = 0
+        self.rollbacks = 0
+
+    async def acquire_session_lock(self, customer_id: UUID, key: str) -> None:
+        self.session_locks.append((customer_id, key))
+
+    async def acquire_event_lock(self, provider_event_id: str) -> None:
+        self.event_locks.append(provider_event_id)
+
+    async def acquire_refund_lock(self, payment_id: UUID) -> None:
+        self.refund_locks.append(payment_id)
+
+    async def get_by_idempotency_key(
+        self,
+        customer_id: UUID,
+        key: str,
+    ) -> PaymentBundle | None:
+        payment = next(
+            (
+                payment
+                for payment in self.payments.values()
+                if payment.customer_id == customer_id and payment.idempotency_key == key
+            ),
+            None,
+        )
+        return self._bundle(payment) if payment else None
+
+    async def get_by_order(
+        self,
+        order_id: UUID,
+        *,
+        for_update: bool = False,
+    ) -> PaymentBundle | None:
+        payment = next(
+            (payment for payment in self.payments.values() if payment.order_id == order_id),
+            None,
+        )
+        return self._bundle(payment) if payment else None
+
+    async def get(
+        self,
+        payment_id: UUID,
+        *,
+        for_update: bool = False,
+    ) -> PaymentBundle | None:
+        payment = self.payments.get(payment_id)
+        return self._bundle(payment) if payment else None
+
+    async def get_by_provider_id(
+        self,
+        provider_payment_id: str,
+        *,
+        for_update: bool = False,
+    ) -> PaymentBundle | None:
+        payment = next(
+            (
+                payment
+                for payment in self.payments.values()
+                if payment.provider_payment_id == provider_payment_id
+            ),
+            None,
+        )
+        return self._bundle(payment) if payment else None
+
+    async def list_payments(
+        self,
+        filters: PaymentFilters,
+    ) -> tuple[list[PaymentBundle], int]:
+        payments = list(self.payments.values())
+        if filters.customer_id is not None:
+            payments = [
+                payment for payment in payments if payment.customer_id == filters.customer_id
+            ]
+        if filters.status is not None:
+            payments = [payment for payment in payments if payment.status == filters.status]
+        payments.sort(key=lambda payment: (payment.created_at, payment.id), reverse=True)
+        total = len(payments)
+        start = (filters.page - 1) * filters.page_size
+        return [
+            self._bundle(payment) for payment in payments[start : start + filters.page_size]
+        ], total
+
+    async def get_event(self, provider_event_id: str) -> PaymentWebhookEvent | None:
+        return self.events.get(provider_event_id)
+
+    async def get_refund_by_payment(self, payment_id: UUID) -> PaymentRefund | None:
+        return self.refunds.get(payment_id)
+
+    def add_payment(self, payment: Payment) -> None:
+        now = datetime.now(UTC)
+        payment.created_at = now
+        payment.updated_at = now
+        self.payments[payment.id] = payment
+
+    def add_event(self, event: PaymentWebhookEvent) -> None:
+        event.created_at = datetime.now(UTC)
+        self.events[event.provider_event_id] = event
+
+    def add_refund(self, refund: PaymentRefund) -> None:
+        refund.created_at = datetime.now(UTC)
+        self.refunds[refund.payment_id] = refund
+
+    async def flush(self) -> None:
+        return None
+
+    async def commit(self) -> None:
+        self.commits += 1
+
+    async def rollback(self) -> None:
+        self.rollbacks += 1
+
+    def _bundle(self, payment: Payment) -> PaymentBundle:
+        return PaymentBundle(payment=payment, refund=self.refunds.get(payment.id))

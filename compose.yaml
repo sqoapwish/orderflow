@@ -12,6 +12,9 @@ services:
       ORDERFLOW_REDIS_URL: redis://redis:6379/0
       ORDERFLOW_RABBITMQ_URL: amqp://${POSTGRES_USER:-orderflow}:${POSTGRES_PASSWORD:-orderflow_local_password}@rabbitmq:5672//
       ORDERFLOW_JWT_SECRET: ${ORDERFLOW_JWT_SECRET:-local-development-jwt-secret-change-me}
+      ORDERFLOW_PAYMENT_WEBHOOK_SECRET: ${ORDERFLOW_PAYMENT_WEBHOOK_SECRET:-local-development-payment-webhook-secret-change-me}
+      ORDERFLOW_PAYMENT_WEBHOOK_TOLERANCE_SECONDS: ${ORDERFLOW_PAYMENT_WEBHOOK_TOLERANCE_SECONDS:-300}
+      ORDERFLOW_PAYMENT_SESSION_TTL_MINUTES: ${ORDERFLOW_PAYMENT_SESSION_TTL_MINUTES:-30}
     ports:
       - "${API_PORT:-8002}:8000"
     depends_on:

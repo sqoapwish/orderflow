@@ -13,6 +13,7 @@ from orderflow.modules.cart import models as cart_models  # noqa: F401
 from orderflow.modules.catalog import models as catalog_models  # noqa: F401
 from orderflow.modules.inventory import models as inventory_models  # noqa: F401
 from orderflow.modules.orders import models as orders_models  # noqa: F401
+from orderflow.modules.payments import models as payments_models  # noqa: F401
 
 config = context.config
 

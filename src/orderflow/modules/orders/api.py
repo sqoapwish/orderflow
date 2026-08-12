@@ -10,6 +10,8 @@ from orderflow.modules.orders.dependencies import get_order_service
 from orderflow.modules.orders.domain import OrderFilters, OrderStatus
 from orderflow.modules.orders.schemas import OrderPageResponse, OrderResponse
 from orderflow.modules.orders.service import OrderService
+from orderflow.modules.payments.dependencies import get_payment_service
+from orderflow.modules.payments.service import PaymentService
 
 router = APIRouter()
 
@@ -19,6 +21,7 @@ OrderActorDependency = Annotated[
     Depends(require_roles(UserRole.CUSTOMER, UserRole.MANAGER, UserRole.ADMIN)),
 ]
 OrderCustomerDependency = Annotated[User, Depends(require_roles(UserRole.CUSTOMER))]
+OrderPaymentServiceDependency = Annotated[PaymentService, Depends(get_payment_service)]
 
 
 @router.post(
@@ -79,6 +82,24 @@ async def get_order(
     actor: OrderActorDependency,
 ) -> OrderResponse:
     bundle = await service.get_order(
+        order_id,
+        requester_id=actor.id,
+        requester_role=actor.role,
+    )
+    return OrderResponse.from_bundle(bundle)
+
+
+@router.post(
+    "/{order_id}/cancel",
+    response_model=OrderResponse,
+    summary="Cancel a pending order and release its reservations",
+)
+async def cancel_order(
+    order_id: UUID,
+    service: OrderPaymentServiceDependency,
+    actor: OrderActorDependency,
+) -> OrderResponse:
+    bundle = await service.cancel_order(
         order_id,
         requester_id=actor.id,
         requester_role=actor.role,

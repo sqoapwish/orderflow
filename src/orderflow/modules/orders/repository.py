@@ -26,7 +26,12 @@ class OrderRepositoryProtocol(Protocol):
         key: str,
     ) -> OrderBundle | None: ...
 
-    async def get(self, order_id: UUID) -> OrderBundle | None: ...
+    async def get(
+        self,
+        order_id: UUID,
+        *,
+        for_update: bool = False,
+    ) -> OrderBundle | None: ...
 
     async def list_orders(
         self,
@@ -70,8 +75,13 @@ class OrderRepository:
         items_by_order = await self._list_items([order.id])
         return OrderBundle(order=order, items=items_by_order[order.id])
 
-    async def get(self, order_id: UUID) -> OrderBundle | None:
-        order = await self._session.get(Order, order_id)
+    async def get(
+        self,
+        order_id: UUID,
+        *,
+        for_update: bool = False,
+    ) -> OrderBundle | None:
+        order = await self._session.get(Order, order_id, with_for_update=for_update)
         if order is None:
             return None
         items_by_order = await self._list_items([order.id])

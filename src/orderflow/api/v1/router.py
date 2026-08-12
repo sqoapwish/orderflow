@@ -6,6 +6,7 @@ from orderflow.modules.cart.api import router as cart_router
 from orderflow.modules.catalog.api import router as catalog_router
 from orderflow.modules.inventory.api import router as inventory_router
 from orderflow.modules.orders.api import router as orders_router
+from orderflow.modules.payments.api import router as payments_router
 
 router = APIRouter()
 router.include_router(health_router, prefix="/health", tags=["Health"])
@@ -14,3 +15,4 @@ router.include_router(catalog_router, prefix="/catalog", tags=["Catalog"])
 router.include_router(inventory_router, prefix="/inventory", tags=["Inventory"])
 router.include_router(cart_router, prefix="/cart", tags=["Cart"])
 router.include_router(orders_router, prefix="/orders", tags=["Orders"])
+router.include_router(payments_router, prefix="/payments", tags=["Payments"])
