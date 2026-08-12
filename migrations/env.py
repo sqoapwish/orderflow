@@ -10,6 +10,7 @@ from orderflow.core.config import Settings
 from orderflow.infrastructure.database import Base
 from orderflow.modules.auth import models as auth_models  # noqa: F401
 from orderflow.modules.catalog import models as catalog_models  # noqa: F401
+from orderflow.modules.inventory import models as inventory_models  # noqa: F401
 
 config = context.config
 
