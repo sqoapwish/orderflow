@@ -344,6 +344,9 @@ class InventoryService:
             created_by_user_id=actor_id,
         )
         self._repository.add_reservation(reservation)
+        # The movement references this reservation by foreign key. Flush the parent row
+        # first while keeping both records in the same transaction.
+        await self._flush()
         balance.reserved += quantity
         self._record_movement(
             operation_id=uuid4(),
@@ -493,9 +496,16 @@ class InventoryService:
             )
         )
 
-    async def _save(self) -> None:
+    async def _flush(self) -> None:
         try:
             await self._repository.flush()
+        except IntegrityError:
+            await self._repository.rollback()
+            raise InventoryWriteConflictError from None
+
+    async def _save(self) -> None:
+        await self._flush()
+        try:
             await self._repository.commit()
         except IntegrityError:
             await self._repository.rollback()

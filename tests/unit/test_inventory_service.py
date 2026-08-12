@@ -22,7 +22,7 @@ from orderflow.modules.inventory.errors import (
     WarehouseNotEmptyError,
     WarehouseNotFoundError,
 )
-from orderflow.modules.inventory.models import Warehouse
+from orderflow.modules.inventory.models import InventoryMovement, InventoryReservation, Warehouse
 from orderflow.modules.inventory.service import InventoryService
 from tests.fakes import FakeInventoryRepository, FakeProductAvailability, build_inventory_service
 
@@ -213,6 +213,50 @@ async def test_reservation_is_idempotent_and_prevents_overselling() -> None:
             reason="Would consume reserved stock",
             actor_id=actor_id,
         )
+
+
+async def test_new_reservation_is_flushed_before_referencing_movement() -> None:
+    class FlushOrderRepository(FakeInventoryRepository):
+        def __init__(self) -> None:
+            super().__init__()
+            self.events: list[str] = []
+
+        def add_reservation(self, reservation: InventoryReservation) -> None:
+            super().add_reservation(reservation)
+            self.events.append("reservation")
+
+        def add_movement(self, movement: InventoryMovement) -> None:
+            super().add_movement(movement)
+            self.events.append("movement")
+
+        async def flush(self) -> None:
+            self.events.append("flush")
+            await super().flush()
+
+        async def commit(self) -> None:
+            self.events.append("commit")
+            await super().commit()
+
+    product_id = uuid4()
+    actor_id = uuid4()
+    repository = FlushOrderRepository()
+    availability = FakeProductAvailability()
+    availability.product_ids.add(product_id)
+    availability.active_product_ids.add(product_id)
+    service = InventoryService(repository, availability)
+    warehouse = await create_warehouse(service)
+    await receive(service, warehouse.id, product_id, 1, actor_id)
+    repository.events.clear()
+
+    await service.reserve_stock(
+        reservation_key="flush-before-movement",
+        warehouse_id=warehouse.id,
+        product_id=product_id,
+        quantity=1,
+        actor_id=actor_id,
+    )
+
+    assert repository.events == ["reservation", "flush", "movement", "flush", "commit"]
 
 
 async def test_reservation_release_and_consume_are_terminal_and_idempotent() -> None:
