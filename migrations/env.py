@@ -6,9 +6,10 @@ from sqlalchemy import pool
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
-import orderflow.modules.auth.models  # noqa: F401
 from orderflow.core.config import Settings
 from orderflow.infrastructure.database import Base
+from orderflow.modules.auth import models as auth_models  # noqa: F401
+from orderflow.modules.catalog import models as catalog_models  # noqa: F401
 
 config = context.config
 
