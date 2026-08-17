@@ -1,6 +1,7 @@
 import asyncio
 import json
 import os
+from collections import Counter
 from datetime import UTC, datetime
 from typing import cast
 from uuid import UUID, uuid4
@@ -18,6 +19,8 @@ from orderflow.modules.auth.models import User
 from orderflow.modules.inventory.models import StockBalance
 from orderflow.modules.orders.domain import OrderStatus
 from orderflow.modules.orders.models import Order
+from orderflow.modules.outbox.domain import OutboxEventType, OutboxStatus
+from orderflow.modules.outbox.models import OutboxEvent
 from orderflow.modules.payments.domain import PaymentStatus
 from orderflow.modules.payments.models import Payment, PaymentRefund, PaymentWebhookEvent
 from orderflow.modules.payments.provider import MockPaymentProvider
@@ -341,4 +344,30 @@ async def test_payment_lifecycle_is_atomic_and_idempotent_with_postgresql() -> N
             paid_order_row = await session.get(Order, UUID(str(paid_order["id"])))
             assert paid_row is not None and paid_row.status is PaymentStatus.REFUNDED
             assert paid_order_row is not None and paid_order_row.status is OrderStatus.REFUNDED
+            scenario_aggregate_ids = [
+                UUID(str(paid_order["id"])),
+                UUID(str(failed_order["id"])),
+                UUID(str(cancelled_order["id"])),
+                UUID(str(paid_payment["id"])),
+                UUID(str(failed_payment["id"])),
+            ]
+            outbox_events = list(
+                (
+                    await session.scalars(
+                        select(OutboxEvent).where(
+                            OutboxEvent.aggregate_id.in_(scenario_aggregate_ids)
+                        )
+                    )
+                ).all()
+            )
+            assert Counter(event.event_type for event in outbox_events) == Counter(
+                {
+                    OutboxEventType.ORDER_CREATED: 3,
+                    OutboxEventType.ORDER_CANCELLED: 1,
+                    OutboxEventType.PAYMENT_SUCCEEDED: 1,
+                    OutboxEventType.PAYMENT_FAILED: 1,
+                    OutboxEventType.PAYMENT_REFUNDED: 1,
+                }
+            )
+            assert all(event.status is OutboxStatus.PENDING for event in outbox_events)
             break

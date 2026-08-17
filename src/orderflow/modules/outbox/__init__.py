@@ -1,1 +1,1 @@
-"""Transactional outbox module (implemented in stage 7)."""
+"""Transactional outbox and idempotent inbox processing."""

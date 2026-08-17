@@ -16,6 +16,9 @@ from orderflow.modules.orders.errors import (
 )
 from orderflow.modules.orders.models import OrderItem
 from orderflow.modules.orders.repository import OrderBundle, OrderRepositoryProtocol
+from orderflow.modules.outbox.domain import OutboxEventType
+from orderflow.modules.outbox.repository import OutboxWriterProtocol
+from orderflow.modules.outbox.service import build_outbox_event
 from orderflow.modules.payments.domain import (
     PaymentEventType,
     PaymentFilters,
@@ -86,6 +89,7 @@ class PaymentService:
         orders: OrderRepositoryProtocol,
         inventory: PaymentInventoryProtocol,
         provider: MockPaymentProvider,
+        outbox: OutboxWriterProtocol,
         *,
         webhook_tolerance_seconds: int,
     ) -> None:
@@ -93,6 +97,7 @@ class PaymentService:
         self._orders = orders
         self._inventory = inventory
         self._provider = provider
+        self._outbox = outbox
         self._webhook_tolerance_seconds = webhook_tolerance_seconds
 
     async def create_session(
@@ -229,6 +234,22 @@ class PaymentService:
                 payment.status = PaymentStatus.CANCELLED
                 payment.processed_at = datetime.now(UTC)
             await self._release_reservations(order_bundle)
+            self._outbox.add(
+                build_outbox_event(
+                    event_type=OutboxEventType.ORDER_CANCELLED,
+                    aggregate_type="order",
+                    aggregate_id=order_bundle.order.id,
+                    deduplication_key=f"order:{order_bundle.order.id}:cancelled",
+                    payload={
+                        "order_id": str(order_bundle.order.id),
+                        "customer_id": str(order_bundle.order.customer_id),
+                        "status": order_bundle.order.status.value,
+                        "payment_id": (
+                            str(payment_bundle.payment.id) if payment_bundle is not None else None
+                        ),
+                    },
+                )
+            )
             await self._repository.flush()
             await self._repository.commit()
             return order_bundle
@@ -284,6 +305,24 @@ class PaymentService:
             self._repository.add_refund(refund)
             payment.status = PaymentStatus.REFUNDED
             payment.processed_at = datetime.now(UTC)
+            self._outbox.add(
+                build_outbox_event(
+                    event_type=OutboxEventType.PAYMENT_REFUNDED,
+                    aggregate_type="payment",
+                    aggregate_id=payment.id,
+                    deduplication_key=f"payment:{payment.id}:refunded",
+                    payload={
+                        "payment_id": str(payment.id),
+                        "order_id": str(payment.order_id),
+                        "customer_id": str(payment.customer_id),
+                        "refund_id": str(refund.id),
+                        "amount_minor": refund.amount_minor,
+                        "currency": refund.currency,
+                        "status": payment.status.value,
+                        "actor_id": str(actor_id),
+                    },
+                )
+            )
             await self._repository.flush()
             await self._repository.commit()
             return PaymentMutationResult(
@@ -344,6 +383,31 @@ class PaymentService:
                     outcome=outcome,
                 )
             )
+            if outcome is WebhookOutcome.PROCESSED:
+                event_type = (
+                    OutboxEventType.PAYMENT_SUCCEEDED
+                    if payload.type is PaymentEventType.SUCCEEDED
+                    else OutboxEventType.PAYMENT_FAILED
+                )
+                self._outbox.add(
+                    build_outbox_event(
+                        event_type=event_type,
+                        aggregate_type="payment",
+                        aggregate_id=payment.id,
+                        deduplication_key=f"payment:{payment.id}:{event_type.value}",
+                        payload={
+                            "payment_id": str(payment.id),
+                            "order_id": str(payment.order_id),
+                            "customer_id": str(payment.customer_id),
+                            "amount_minor": payment.amount_minor,
+                            "currency": payment.currency,
+                            "status": payment.status.value,
+                            "order_status": order_bundle.order.status.value,
+                            "failure_code": payment.failure_code,
+                            "provider_event_id": payload.event_id,
+                        },
+                    )
+                )
             await self._repository.flush()
             await self._repository.commit()
             return WebhookResult(status=outcome.value)

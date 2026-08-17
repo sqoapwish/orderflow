@@ -13,11 +13,13 @@ from orderflow.modules.inventory.service import InventoryService
 from orderflow.modules.orders.domain import OrderFilters, OrderStatus
 from orderflow.modules.orders.errors import InvalidIdempotencyKeyError, OrderNotFoundError
 from orderflow.modules.orders.service import OrderService
+from orderflow.modules.outbox.domain import OutboxEventType
 from tests.fakes import (
     FakeCartRepository,
     FakeCatalogRepository,
     FakeInventoryRepository,
     FakeOrderRepository,
+    FakeOutboxRepository,
 )
 
 
@@ -30,6 +32,7 @@ class OrderContext:
     cart_repository: FakeCartRepository
     inventory_repository: FakeInventoryRepository
     order_repository: FakeOrderRepository
+    outbox_repository: FakeOutboxRepository
     product: Product
     warehouse: Warehouse
     customer_id: UUID
@@ -74,14 +77,16 @@ async def build_order_context() -> OrderContext:
     cart_repository = FakeCartRepository()
     cart = CartService(cart_repository, catalog, inventory)
     order_repository = FakeOrderRepository()
+    outbox_repository = FakeOutboxRepository()
     return OrderContext(
-        service=OrderService(order_repository, cart, catalog, inventory),
+        service=OrderService(order_repository, cart, catalog, inventory, outbox_repository),
         cart=cart,
         catalog=catalog,
         inventory=inventory,
         cart_repository=cart_repository,
         inventory_repository=inventory_repository,
         order_repository=order_repository,
+        outbox_repository=outbox_repository,
         product=product,
         warehouse=warehouse,
         customer_id=customer_id,
@@ -124,6 +129,12 @@ async def test_checkout_is_atomic_in_shape_idempotent_and_snapshots_catalog() ->
         (context.customer_id, "checkout-42"),
         (context.customer_id, "checkout-42"),
     ]
+    assert len(context.outbox_repository.events) == 1
+    event = context.outbox_repository.events[0]
+    assert event.event_type is OutboxEventType.ORDER_CREATED
+    assert event.aggregate_id == created.bundle.order.id
+    assert event.payload["total_minor"] == 399_800
+    assert event.payload["item_count"] == 1
 
     await context.catalog.update_product(
         context.product.id,

@@ -15,6 +15,11 @@ services:
       ORDERFLOW_PAYMENT_WEBHOOK_SECRET: ${ORDERFLOW_PAYMENT_WEBHOOK_SECRET:-local-development-payment-webhook-secret-change-me}
       ORDERFLOW_PAYMENT_WEBHOOK_TOLERANCE_SECONDS: ${ORDERFLOW_PAYMENT_WEBHOOK_TOLERANCE_SECONDS:-300}
       ORDERFLOW_PAYMENT_SESSION_TTL_MINUTES: ${ORDERFLOW_PAYMENT_SESSION_TTL_MINUTES:-30}
+      ORDERFLOW_OUTBOX_DISPATCH_BATCH_SIZE: ${ORDERFLOW_OUTBOX_DISPATCH_BATCH_SIZE:-50}
+      ORDERFLOW_OUTBOX_DISPATCH_INTERVAL_SECONDS: ${ORDERFLOW_OUTBOX_DISPATCH_INTERVAL_SECONDS:-5}
+      ORDERFLOW_OUTBOX_MAX_ATTEMPTS: ${ORDERFLOW_OUTBOX_MAX_ATTEMPTS:-5}
+      ORDERFLOW_OUTBOX_RETRY_BASE_SECONDS: ${ORDERFLOW_OUTBOX_RETRY_BASE_SECONDS:-5}
+      ORDERFLOW_OUTBOX_RETRY_MAX_SECONDS: ${ORDERFLOW_OUTBOX_RETRY_MAX_SECONDS:-300}
     ports:
       - "${API_PORT:-8002}:8000"
     depends_on:
@@ -44,6 +49,7 @@ services:
       - celery
       - --app=orderflow.workers.celery_app:celery_app
       - worker
+      - --queues=celery,outbox,domain-events
       - --loglevel=INFO
     environment: *app-environment
     depends_on:
@@ -61,6 +67,25 @@ services:
       timeout: 10s
       retries: 5
       start_period: 20s
+    restart: unless-stopped
+
+  beat:
+    build:
+      context: .
+    entrypoint: []
+    command:
+      - celery
+      - --app=orderflow.workers.celery_app:celery_app
+      - beat
+      - --loglevel=INFO
+    environment: *app-environment
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
     restart: unless-stopped
 
   db:

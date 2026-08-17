@@ -38,6 +38,11 @@ class Settings(BaseSettings):
     redis_url: str = "redis://localhost:6379/0"
     rabbitmq_url: str = "amqp://guest:guest@localhost:5672//"
     health_check_timeout_seconds: float = Field(default=2.0, gt=0, le=10)
+    outbox_dispatch_batch_size: int = Field(default=50, ge=1, le=500)
+    outbox_dispatch_interval_seconds: float = Field(default=5.0, ge=1.0, le=300.0)
+    outbox_max_attempts: int = Field(default=5, ge=1, le=20)
+    outbox_retry_base_seconds: int = Field(default=5, ge=1, le=3600)
+    outbox_retry_max_seconds: int = Field(default=300, ge=1, le=86400)
 
     jwt_secret: SecretStr = SecretStr(LOCAL_JWT_SECRET)
     jwt_issuer: str = "orderflow"
@@ -66,6 +71,8 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def validate_production_security(self) -> Self:
+        if self.outbox_retry_max_seconds < self.outbox_retry_base_seconds:
+            raise ValueError("Outbox maximum retry delay must not be below its base delay")
         if self.environment is Environment.PRODUCTION and self.debug:
             raise ValueError("Debug mode must be disabled in production")
         if (

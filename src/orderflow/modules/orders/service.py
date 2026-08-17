@@ -19,6 +19,9 @@ from orderflow.modules.orders.errors import (
 )
 from orderflow.modules.orders.models import Order, OrderItem
 from orderflow.modules.orders.repository import OrderBundle, OrderRepositoryProtocol
+from orderflow.modules.outbox.domain import OutboxEventType
+from orderflow.modules.outbox.repository import OutboxWriterProtocol
+from orderflow.modules.outbox.service import build_outbox_event
 
 MAX_BIGINT = 9_223_372_036_854_775_807
 
@@ -68,11 +71,13 @@ class OrderService:
         cart: CheckoutCartProtocol,
         catalog: CheckoutCatalogProtocol,
         inventory: CheckoutInventoryProtocol,
+        outbox: OutboxWriterProtocol,
     ) -> None:
         self._repository = repository
         self._cart = cart
         self._catalog = catalog
         self._inventory = inventory
+        self._outbox = outbox
 
     async def checkout(self, *, customer_id: UUID, idempotency_key: str) -> CheckoutResult:
         key = idempotency_key.strip()
@@ -145,6 +150,23 @@ class OrderService:
                 order_items.append(item)
 
             await self._cart.clear_locked(cart_bundle.cart.id)
+            self._outbox.add(
+                build_outbox_event(
+                    event_type=OutboxEventType.ORDER_CREATED,
+                    aggregate_type="order",
+                    aggregate_id=order.id,
+                    deduplication_key=f"order:{order.id}:created",
+                    payload={
+                        "order_id": str(order.id),
+                        "order_number": order.order_number,
+                        "customer_id": str(order.customer_id),
+                        "status": order.status.value,
+                        "total_minor": order.total_minor,
+                        "currency": order.currency,
+                        "item_count": len(order_items),
+                    },
+                )
+            )
             await self._repository.flush()
             await self._repository.commit()
             return CheckoutResult(

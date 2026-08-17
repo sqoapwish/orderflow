@@ -13,6 +13,7 @@ from orderflow.modules.inventory.models import Warehouse
 from orderflow.modules.inventory.service import InventoryService
 from orderflow.modules.orders.domain import OrderStatus
 from orderflow.modules.orders.service import OrderService
+from orderflow.modules.outbox.domain import OutboxEventType
 from orderflow.modules.payments.domain import PaymentFilters, PaymentStatus
 from orderflow.modules.payments.errors import (
     InvalidWebhookSignatureError,
@@ -26,6 +27,7 @@ from tests.fakes import (
     FakeCatalogRepository,
     FakeInventoryRepository,
     FakeOrderRepository,
+    FakeOutboxRepository,
     FakePaymentRepository,
 )
 
@@ -40,6 +42,7 @@ class PaymentContext:
     order_repository: FakeOrderRepository
     inventory_repository: FakeInventoryRepository
     payment_repository: FakePaymentRepository
+    outbox_repository: FakeOutboxRepository
     cart: CartService
     product: Product
     warehouse: Warehouse
@@ -84,7 +87,8 @@ async def build_payment_context() -> PaymentContext:
     )
     cart = CartService(FakeCartRepository(), catalog, inventory)
     order_repository = FakeOrderRepository()
-    orders = OrderService(order_repository, cart, catalog, inventory)
+    outbox_repository = FakeOutboxRepository()
+    orders = OrderService(order_repository, cart, catalog, inventory, outbox_repository)
     payment_repository = FakePaymentRepository()
     provider = MockPaymentProvider(
         webhook_secret=TEST_WEBHOOK_SECRET,
@@ -95,6 +99,7 @@ async def build_payment_context() -> PaymentContext:
         order_repository,
         inventory,
         provider,
+        outbox_repository,
         webhook_tolerance_seconds=300,
     )
     return PaymentContext(
@@ -104,6 +109,7 @@ async def build_payment_context() -> PaymentContext:
         order_repository=order_repository,
         inventory_repository=inventory_repository,
         payment_repository=payment_repository,
+        outbox_repository=outbox_repository,
         cart=cart,
         product=product,
         warehouse=warehouse,
@@ -192,6 +198,10 @@ async def test_session_success_webhook_duplicate_and_refund_are_idempotent() -> 
     balance = context.inventory_repository.balances[(context.warehouse.id, context.product.id)]
     assert balance.on_hand == 3
     assert balance.reserved == 0
+    assert [event.event_type for event in context.outbox_repository.events] == [
+        OutboxEventType.ORDER_CREATED,
+        OutboxEventType.PAYMENT_SUCCEEDED,
+    ]
 
     late_failure = webhook_body(
         event_id="evt-late-failure-1",
@@ -219,6 +229,11 @@ async def test_session_success_webhook_duplicate_and_refund_are_idempotent() -> 
     assert context.order_repository.orders[order_id].status is OrderStatus.REFUNDED
     assert balance.on_hand == 3
     assert balance.reserved == 0
+    assert [event.event_type for event in context.outbox_repository.events] == [
+        OutboxEventType.ORDER_CREATED,
+        OutboxEventType.PAYMENT_SUCCEEDED,
+        OutboxEventType.PAYMENT_REFUNDED,
+    ]
 
 
 async def test_failed_payment_and_cancel_release_reservations() -> None:
@@ -247,6 +262,10 @@ async def test_failed_payment_and_cancel_release_reservations() -> None:
     ]
     assert failed_balance.on_hand == 5
     assert failed_balance.reserved == 0
+    assert [event.event_type for event in failed_context.outbox_repository.events] == [
+        OutboxEventType.ORDER_CREATED,
+        OutboxEventType.PAYMENT_FAILED,
+    ]
 
     cancelled_context = await build_payment_context()
     cancelled_order_id = await create_order(cancelled_context)
@@ -270,6 +289,10 @@ async def test_failed_payment_and_cancel_release_reservations() -> None:
     ]
     assert cancelled_balance.on_hand == 5
     assert cancelled_balance.reserved == 0
+    assert [event.event_type for event in cancelled_context.outbox_repository.events] == [
+        OutboxEventType.ORDER_CREATED,
+        OutboxEventType.ORDER_CANCELLED,
+    ]
 
 
 async def test_webhook_rejects_invalid_signature_stale_timestamp_and_event_mutation() -> None:
