@@ -34,6 +34,7 @@ class OutboxEvent(Base):
             "created_at",
         ),
         Index("ix_outbox_events_aggregate", "aggregate_type", "aggregate_id"),
+        Index("ix_outbox_events_analytics", "event_type", "created_at"),
     )
 
     id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)

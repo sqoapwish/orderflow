@@ -14,6 +14,7 @@ def test_settings_have_safe_local_defaults(monkeypatch: pytest.MonkeyPatch) -> N
     assert settings.api_v1_prefix == "/api/v1"
     assert settings.payment_webhook_tolerance_seconds == 300
     assert settings.payment_session_ttl_minutes == 30
+    assert settings.analytics_cache_ttl_seconds == 30
 
 
 def test_settings_read_prefixed_environment_variables(monkeypatch: pytest.MonkeyPatch) -> None:

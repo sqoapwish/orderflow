@@ -5,6 +5,13 @@ from uuid import UUID, uuid4
 from argon2 import PasswordHasher
 
 from orderflow.core.config import Settings
+from orderflow.modules.analytics.domain import (
+    AnalyticsPeriod,
+    CurrencySalesRow,
+    DailySalesRow,
+    LowStockRow,
+    TopProductRow,
+)
 from orderflow.modules.audit.domain import AuditFilters
 from orderflow.modules.audit.models import AuditEvent
 from orderflow.modules.auth.models import RefreshSession, User
@@ -818,3 +825,63 @@ class FakeAuditRepository:
         total = len(events)
         start = (filters.page - 1) * filters.page_size
         return events[start : start + filters.page_size], total
+
+
+class FakeAnalyticsRepository:
+    def __init__(self) -> None:
+        self.currency_sales: list[CurrencySalesRow] = []
+        self.daily_sales: list[DailySalesRow] = []
+        self.top_product_rows: list[TopProductRow] = []
+        self.low_stock_rows: list[LowStockRow] = []
+        self.low_stock_total = 0
+        self.sales_periods: list[AnalyticsPeriod] = []
+        self.top_product_calls: list[tuple[AnalyticsPeriod, int]] = []
+        self.low_stock_calls: list[tuple[int, UUID | None, int, int]] = []
+
+    async def sales_summary(
+        self,
+        period: AnalyticsPeriod,
+    ) -> tuple[list[CurrencySalesRow], list[DailySalesRow]]:
+        self.sales_periods.append(period)
+        return self.currency_sales, self.daily_sales
+
+    async def top_products(
+        self,
+        period: AnalyticsPeriod,
+        *,
+        limit: int,
+    ) -> list[TopProductRow]:
+        self.top_product_calls.append((period, limit))
+        return self.top_product_rows[:limit]
+
+    async def low_stock(
+        self,
+        *,
+        threshold: int,
+        warehouse_id: UUID | None,
+        page: int,
+        page_size: int,
+    ) -> tuple[list[LowStockRow], int]:
+        self.low_stock_calls.append((threshold, warehouse_id, page, page_size))
+        return self.low_stock_rows, self.low_stock_total
+
+
+class FakeAnalyticsCache:
+    def __init__(self) -> None:
+        self.values: dict[str, str] = {}
+        self.get_calls: list[str] = []
+        self.set_calls: list[tuple[str, str, int]] = []
+        self.fail_reads = False
+        self.fail_writes = False
+
+    async def get(self, key: str) -> str | None:
+        self.get_calls.append(key)
+        if self.fail_reads:
+            raise RuntimeError("cache unavailable")
+        return self.values.get(key)
+
+    async def set(self, key: str, value: str, *, ttl_seconds: int) -> None:
+        self.set_calls.append((key, value, ttl_seconds))
+        if self.fail_writes:
+            raise RuntimeError("cache unavailable")
+        self.values[key] = value
