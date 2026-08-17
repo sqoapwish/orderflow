@@ -7,6 +7,8 @@ from celery import shared_task
 from orderflow.core.config import Settings
 from orderflow.core.logging import configure_logging
 from orderflow.infrastructure.database import Database
+from orderflow.modules.audit.repository import AuditRepository
+from orderflow.modules.audit.service import AuditDomainEventHandler
 from orderflow.modules.outbox.publisher import CeleryEventPublisher
 from orderflow.modules.outbox.repository import InboxRepository, OutboxRepository
 from orderflow.modules.outbox.service import InboxService, OutboxDispatcher
@@ -89,7 +91,10 @@ async def _consume_domain_event(
     database = Database(settings)
     try:
         async with database.session_factory() as session:
-            outcome = await InboxService(InboxRepository(session)).consume(
+            outcome = await InboxService(
+                InboxRepository(session),
+                AuditDomainEventHandler(AuditRepository(session)),
+            ).consume(
                 event_id=event_id,
                 event_type=event_type,
                 aggregate_type=aggregate_type,

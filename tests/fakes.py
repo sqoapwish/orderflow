@@ -5,6 +5,8 @@ from uuid import UUID, uuid4
 from argon2 import PasswordHasher
 
 from orderflow.core.config import Settings
+from orderflow.modules.audit.domain import AuditFilters
+from orderflow.modules.audit.models import AuditEvent
 from orderflow.modules.auth.models import RefreshSession, User
 from orderflow.modules.auth.security import PasswordService, TokenService
 from orderflow.modules.auth.service import AuthService
@@ -784,3 +786,35 @@ class FakeInboxRepository:
 
     async def rollback(self) -> None:
         self.rollbacks += 1
+
+
+class FakeAuditRepository:
+    def __init__(self) -> None:
+        self.events: dict[UUID, AuditEvent] = {}
+
+    def add(self, event: AuditEvent) -> None:
+        self.events[event.id] = event
+
+    async def get(self, event_id: UUID) -> AuditEvent | None:
+        return self.events.get(event_id)
+
+    async def list_events(self, filters: AuditFilters) -> tuple[list[AuditEvent], int]:
+        events = list(self.events.values())
+        if filters.action is not None:
+            events = [event for event in events if event.action == filters.action]
+        if filters.actor_id is not None:
+            events = [event for event in events if event.actor_id == filters.actor_id]
+        if filters.resource_type is not None:
+            events = [event for event in events if event.resource_type == filters.resource_type]
+        if filters.resource_id is not None:
+            events = [event for event in events if event.resource_id == filters.resource_id]
+        if filters.correlation_id is not None:
+            events = [event for event in events if event.correlation_id == filters.correlation_id]
+        if filters.occurred_from is not None:
+            events = [event for event in events if event.occurred_at >= filters.occurred_from]
+        if filters.occurred_to is not None:
+            events = [event for event in events if event.occurred_at <= filters.occurred_to]
+        events.sort(key=lambda event: (event.occurred_at, event.id), reverse=True)
+        total = len(events)
+        start = (filters.page - 1) * filters.page_size
+        return events[start : start + filters.page_size], total

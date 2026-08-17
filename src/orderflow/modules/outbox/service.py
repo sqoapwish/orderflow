@@ -18,6 +18,20 @@ class EventPublisherProtocol(Protocol):
     async def publish(self, event: OutboxEvent) -> None: ...
 
 
+class DomainEventHandlerProtocol(Protocol):
+    async def handle(
+        self,
+        *,
+        event_id: UUID,
+        event_type: str,
+        aggregate_type: str,
+        aggregate_id: UUID,
+        payload: dict[str, Any],
+        occurred_at: str,
+        correlation_id: str | None,
+    ) -> None: ...
+
+
 @dataclass(frozen=True, slots=True)
 class DispatchSummary:
     claimed: int
@@ -143,8 +157,13 @@ class OutboxDispatcher:
 
 
 class InboxService:
-    def __init__(self, repository: InboxRepositoryProtocol) -> None:
+    def __init__(
+        self,
+        repository: InboxRepositoryProtocol,
+        handler: DomainEventHandlerProtocol | None = None,
+    ) -> None:
         self._repository = repository
+        self._handler = handler
         self._logger = structlog.get_logger()
 
     async def consume(
@@ -175,6 +194,16 @@ class InboxService:
         )
         try:
             if await self._repository.try_add(event):
+                if self._handler is not None:
+                    await self._handler.handle(
+                        event_id=event_id,
+                        event_type=event_type,
+                        aggregate_type=aggregate_type,
+                        aggregate_id=aggregate_id,
+                        payload=payload,
+                        occurred_at=occurred_at,
+                        correlation_id=correlation_id,
+                    )
                 await self._repository.commit()
                 self._logger.info(
                     "domain_event_consumed",
