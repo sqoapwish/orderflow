@@ -10,6 +10,7 @@ from orderflow.modules.catalog.service import CatalogService
 from orderflow.modules.inventory.repository import InventoryRepository
 from orderflow.modules.inventory.service import InventoryService
 from orderflow.modules.orders.repository import OrderRepository
+from orderflow.modules.outbox.repository import OutboxRepository
 from orderflow.modules.payments.provider import MockPaymentProvider
 from orderflow.modules.payments.repository import PaymentRepository
 from orderflow.modules.payments.service import PaymentService
@@ -31,5 +32,6 @@ def get_payment_service(
         OrderRepository(session),
         inventory,
         provider,
+        OutboxRepository(session),
         webhook_tolerance_seconds=settings.payment_webhook_tolerance_seconds,
     )

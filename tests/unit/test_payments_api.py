@@ -28,6 +28,7 @@ from tests.fakes import (
     FakeCatalogRepository,
     FakeInventoryRepository,
     FakeOrderRepository,
+    FakeOutboxRepository,
     FakePaymentRepository,
     build_auth_service,
 )
@@ -92,7 +93,8 @@ async def payments_api(test_settings: Settings) -> AsyncIterator[PaymentsApiCont
     )
     cart = CartService(FakeCartRepository(), catalog, inventory)
     order_repository = FakeOrderRepository()
-    orders = OrderService(order_repository, cart, catalog, inventory)
+    outbox_repository = FakeOutboxRepository()
+    orders = OrderService(order_repository, cart, catalog, inventory, outbox_repository)
     provider = MockPaymentProvider(
         webhook_secret=test_settings.payment_webhook_secret.get_secret_value(),
         session_ttl_minutes=test_settings.payment_session_ttl_minutes,
@@ -102,6 +104,7 @@ async def payments_api(test_settings: Settings) -> AsyncIterator[PaymentsApiCont
         order_repository,
         inventory,
         provider,
+        outbox_repository,
         webhook_tolerance_seconds=test_settings.payment_webhook_tolerance_seconds,
     )
 

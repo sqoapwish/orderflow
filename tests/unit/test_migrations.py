@@ -14,13 +14,14 @@ from orderflow.modules.inventory.models import (
     Warehouse,
 )
 from orderflow.modules.orders.models import Order, OrderItem
+from orderflow.modules.outbox.models import InboxEvent, OutboxEvent
 from orderflow.modules.payments.models import Payment, PaymentRefund, PaymentWebhookEvent
 
 
 def test_alembic_has_exactly_one_head() -> None:
     script = ScriptDirectory.from_config(Config("alembic.ini"))
 
-    assert script.get_heads() == ["20260812_0006"]
+    assert script.get_heads() == ["20260817_0007"]
 
 
 def test_user_role_check_constraint_is_explicit_and_named() -> None:
@@ -219,3 +220,27 @@ def test_payment_constraints_and_indexes_are_explicit_and_named() -> None:
         "ix_payment_webhook_events_payment_created",
     }
     assert {index.name for index in refund_table.indexes} == set()
+
+
+def test_outbox_constraints_and_indexes_are_explicit_and_named() -> None:
+    outbox_table = cast(Table, OutboxEvent.__table__)
+    inbox_table = cast(Table, InboxEvent.__table__)
+    checks = {
+        str(constraint.name): str(constraint.sqltext)
+        for constraint in outbox_table.constraints
+        if isinstance(constraint, CheckConstraint)
+    }
+
+    assert checks == {
+        "ck_outbox_events_outbox_attempts_nonnegative": "attempts >= 0",
+        "ck_outbox_events_outbox_event_type": (
+            "event_type IN ('order.created', 'order.cancelled', 'payment.succeeded', "
+            "'payment.failed', 'payment.refunded')"
+        ),
+        "ck_outbox_events_outbox_status": ("status IN ('pending', 'published', 'dead_letter')"),
+    }
+    assert {index.name for index in outbox_table.indexes} == {
+        "ix_outbox_events_aggregate",
+        "ix_outbox_events_dispatch",
+    }
+    assert {index.name for index in inbox_table.indexes} == set()

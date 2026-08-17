@@ -26,6 +26,8 @@ from orderflow.modules.inventory.service import InventoryService
 from orderflow.modules.orders.domain import OrderFilters
 from orderflow.modules.orders.models import Order, OrderItem
 from orderflow.modules.orders.repository import OrderBundle
+from orderflow.modules.outbox.domain import OutboxStatus
+from orderflow.modules.outbox.models import InboxEvent, OutboxEvent
 from orderflow.modules.payments.domain import PaymentFilters
 from orderflow.modules.payments.models import Payment, PaymentRefund, PaymentWebhookEvent
 from orderflow.modules.payments.repository import PaymentBundle
@@ -735,3 +737,50 @@ class FakePaymentRepository:
 
     def _bundle(self, payment: Payment) -> PaymentBundle:
         return PaymentBundle(payment=payment, refund=self.refunds.get(payment.id))
+
+
+class FakeOutboxRepository:
+    def __init__(self) -> None:
+        self.events: list[OutboxEvent] = []
+        self.commits = 0
+        self.rollbacks = 0
+
+    def add(self, event: OutboxEvent) -> None:
+        self.events.append(event)
+
+    async def claim_pending(self, *, now: datetime, limit: int) -> list[OutboxEvent]:
+        pending = [
+            event
+            for event in self.events
+            if event.status is OutboxStatus.PENDING and event.available_at <= now
+        ]
+        pending.sort(key=lambda event: (event.available_at, event.created_at, event.id))
+        return pending[:limit]
+
+    async def commit(self) -> None:
+        self.commits += 1
+
+    async def rollback(self) -> None:
+        self.rollbacks += 1
+
+
+class FakeInboxRepository:
+    def __init__(self) -> None:
+        self.events: dict[UUID, InboxEvent] = {}
+        self.commits = 0
+        self.rollbacks = 0
+
+    async def try_add(self, event: InboxEvent) -> bool:
+        if event.event_id in self.events:
+            return False
+        self.events[event.event_id] = event
+        return True
+
+    async def get(self, event_id: UUID) -> InboxEvent | None:
+        return self.events.get(event_id)
+
+    async def commit(self) -> None:
+        self.commits += 1
+
+    async def rollback(self) -> None:
+        self.rollbacks += 1

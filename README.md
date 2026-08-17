@@ -4,7 +4,7 @@
 
 OrderFlow — backend-система управления заказами, оплатами и складскими остатками интернет-магазина. Проект развивается как модульный монолит уровня strong Junior+ с отдельными инженерными решениями уровня Middle: конкурентным резервированием товара, идемпотентностью, подписанными webhooks, Transactional Outbox, аудитом и наблюдаемостью.
 
-> Текущий статус: завершены инженерная основа, аутентификация, каталог, складской учёт, корзина, транзакционное оформление заказа и Mock Payment lifecycle. Следующий инженерный этап — Transactional Outbox и надёжная доставка событий. Возможности не отмечаются готовыми до реализации и тестирования.
+> Текущий статус: завершены инженерная основа, аутентификация, каталог, складской учёт, корзина, транзакционное оформление заказа, Mock Payment lifecycle и Transactional Outbox с надёжной доставкой событий. Следующий инженерный этап — аудит действий и наблюдаемость. Возможности не отмечаются готовыми до реализации и тестирования.
 
 ## Что уже работает
 
@@ -32,6 +32,11 @@ OrderFlow — backend-система управления заказами, оп
 - строгие статусы заказа: `pending_payment`, `paid`, `payment_failed`, `cancelled`, `refunded`;
 - атомарное погашение или освобождение складских резервов по результату платежа;
 - идемпотентный полный возврат без автоматического возврата товара на склад;
+- Transactional Outbox: события заказа и платежа сохраняются вместе с бизнес-изменением;
+- доставка событий через отдельные Celery-очереди и RabbitMQ с publisher confirms;
+- пакетный конкурентный dispatcher с `FOR UPDATE SKIP LOCKED`;
+- экспоненциальные retries и перевод исчерпанных событий в `dead_letter`;
+- идемпотентный Inbox, который отклоняет изменённый повтор одного `event_id`;
 - асинхронная инфраструктура PostgreSQL, Redis и RabbitMQ;
 - Celery worker с безопасными настройками доставки задач;
 - Alembic и первая миграционная граница;
@@ -45,8 +50,8 @@ OrderFlow — backend-система управления заказами, оп
 
 ## Планируемые бизнес-возможности
 
-- Transactional Outbox, retries и dead-letter обработка;
-- аудит, аналитика, метрики и минимальный демонстрационный интерфейс.
+- аудит действий и история изменений;
+- аналитика, метрики и минимальный демонстрационный интерфейс.
 
 ## Архитектура
 
@@ -59,8 +64,10 @@ flowchart TD
     Modules --> PostgreSQL["PostgreSQL"]
     Modules --> Redis["Redis"]
     Modules --> Outbox["Outbox-события"]
-    Outbox --> Worker["Celery Worker"]
-    Worker --> RabbitMQ["RabbitMQ"]
+    Outbox --> Dispatcher["Celery dispatcher"]
+    Dispatcher --> RabbitMQ["RabbitMQ"]
+    RabbitMQ --> Consumer["Celery consumer"]
+    Consumer --> Inbox["Inbox deduplication"]
 ```
 
 Подробности и принятые решения: [документация архитектуры](docs/architecture.md) и [ADR](docs/adr/0001-modular-monolith.md).
@@ -206,10 +213,28 @@ Webhook подписывается HMAC-SHA256 по строке `<unix_timestam
 refund разрешён только для успешной оплаты, фиксирует статусы `refunded` у платежа и заказа, но
 не увеличивает складской остаток: физический возврат товара является отдельной складской операцией.
 
+## Transactional Outbox
+
+Изменение бизнес-состояния и соответствующее доменное событие имеют один PostgreSQL commit. Сейчас
+создаются `order.created`, `order.cancelled`, `payment.succeeded`, `payment.failed` и
+`payment.refunded`. Повтор идемпотентного checkout, webhook или refund не создаёт второе событие;
+это дополнительно защищено уникальным `deduplication_key`.
+
+Celery Beat регулярно запускает dispatcher. Он выбирает доступные `pending`-события пакетами через
+`FOR UPDATE SKIP LOCKED`, поэтому несколько worker-процессов не забирают одну строку одновременно.
+После подтверждённой публикации в RabbitMQ событие становится `published`. Временная ошибка
+увеличивает `attempts` и назначает экспоненциальную задержку; после лимита строка переходит в
+`dead_letter`, не блокируя остальные события.
+
+Гарантия доставки — at-least-once: сбой между отправкой сообщения и фиксацией статуса может вызвать
+повтор. Получатель сохраняет `event_id` и SHA-256 канонического сообщения в `inbox_events`: точный
+повтор безопасно игнорируется, а тот же идентификатор с изменённым содержимым отклоняется. В логах
+dispatcher и consumer сохраняются `event_id`, тип события и исходный `correlation_id`.
+
 Логи и остановка:
 
 ```powershell
-docker compose logs -f api worker
+docker compose logs -f api worker beat
 docker compose down
 ```
 
@@ -235,7 +260,7 @@ uv run pytest --cov=orderflow --cov-report=term-missing
 uv run alembic heads
 ```
 
-Integration-тесты проверяют инфраструктуру, полный auth-flow, каталог, конкурентные складские резервы, идемпотентный checkout и полный платёжный lifecycle на настоящем PostgreSQL. В CI PostgreSQL, Redis и RabbitMQ поднимаются автоматически.
+Integration-тесты проверяют инфраструктуру, полный auth-flow, каталог, конкурентные складские резервы, идемпотентный checkout, полный платёжный lifecycle и атомарное появление Outbox-событий на настоящем PostgreSQL. В CI PostgreSQL, Redis и RabbitMQ поднимаются автоматически.
 
 ## Миграции
 

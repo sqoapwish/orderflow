@@ -22,6 +22,7 @@ from tests.fakes import (
     FakeCatalogRepository,
     FakeInventoryRepository,
     FakeOrderRepository,
+    FakeOutboxRepository,
     build_auth_service,
 )
 
@@ -83,7 +84,13 @@ async def cart_orders_api(test_settings: Settings) -> AsyncIterator[CartOrdersAp
         actor_id=manager.user.id,
     )
     cart = CartService(FakeCartRepository(), catalog, inventory)
-    orders = OrderService(FakeOrderRepository(), cart, catalog, inventory)
+    orders = OrderService(
+        FakeOrderRepository(),
+        cart,
+        catalog,
+        inventory,
+        FakeOutboxRepository(),
+    )
 
     app = create_app(test_settings, readiness_checker=HealthyChecker())
     app.dependency_overrides[get_auth_service] = lambda: auth_service

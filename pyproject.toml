@@ -4,8 +4,8 @@ build-backend = "hatchling.build"
 
 [project]
 name = "orderflow"
-version = "0.6.0"
-description = "Order and inventory management backend with reliable payment workflows"
+version = "0.7.0"
+description = "Order and inventory backend with reliable payment and event workflows"
 readme = "README.md"
 requires-python = ">=3.12,<3.14"
 dependencies = [
