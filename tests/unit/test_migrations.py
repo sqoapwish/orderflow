@@ -4,6 +4,7 @@ from alembic.config import Config
 from alembic.script import ScriptDirectory
 from sqlalchemy import CheckConstraint, Enum, Table
 
+from orderflow.modules.audit.models import AuditEvent
 from orderflow.modules.auth.models import User
 from orderflow.modules.cart.models import Cart, CartItem
 from orderflow.modules.catalog.models import Category, Product
@@ -21,7 +22,7 @@ from orderflow.modules.payments.models import Payment, PaymentRefund, PaymentWeb
 def test_alembic_has_exactly_one_head() -> None:
     script = ScriptDirectory.from_config(Config("alembic.ini"))
 
-    assert script.get_heads() == ["20260817_0007"]
+    assert script.get_heads() == ["20260817_0008"]
 
 
 def test_user_role_check_constraint_is_explicit_and_named() -> None:
@@ -244,3 +245,29 @@ def test_outbox_constraints_and_indexes_are_explicit_and_named() -> None:
         "ix_outbox_events_dispatch",
     }
     assert {index.name for index in inbox_table.indexes} == set()
+
+
+def test_audit_constraints_and_indexes_are_explicit_and_named() -> None:
+    audit_table = cast(Table, AuditEvent.__table__)
+    checks = {
+        str(constraint.name): str(constraint.sqltext)
+        for constraint in audit_table.constraints
+        if isinstance(constraint, CheckConstraint)
+    }
+
+    assert checks == {
+        "ck_audit_events_audit_actor_identity": (
+            "(actor_type = 'system' AND actor_id IS NULL) "
+            "OR (actor_type = 'user' AND actor_id IS NOT NULL)"
+        ),
+        "ck_audit_events_audit_actor_role": (
+            "actor_role IS NULL OR actor_role IN ('customer', 'manager', 'admin')"
+        ),
+        "ck_audit_events_audit_actor_type": "actor_type IN ('user', 'system')",
+    }
+    assert {index.name for index in audit_table.indexes} == {
+        "ix_audit_events_action_occurred",
+        "ix_audit_events_actor_occurred",
+        "ix_audit_events_correlation_id",
+        "ix_audit_events_resource_occurred",
+    }

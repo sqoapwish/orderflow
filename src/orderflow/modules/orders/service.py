@@ -160,6 +160,8 @@ class OrderService:
                         "order_id": str(order.id),
                         "order_number": order.order_number,
                         "customer_id": str(order.customer_id),
+                        "actor_id": str(customer_id),
+                        "actor_role": "customer",
                         "status": order.status.value,
                         "total_minor": order.total_minor,
                         "currency": order.currency,

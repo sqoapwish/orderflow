@@ -216,11 +216,13 @@ async def test_session_success_webhook_duplicate_and_refund_are_idempotent() -> 
     refunded = await context.service.refund_payment(
         created.bundle.payment.id,
         actor_id=uuid4(),
+        actor_role=UserRole.MANAGER,
         idempotency_key="refund-1",
     )
     refund_replay = await context.service.refund_payment(
         created.bundle.payment.id,
         actor_id=uuid4(),
+        actor_role=UserRole.MANAGER,
         idempotency_key="refund-1",
     )
     assert refunded.created is True

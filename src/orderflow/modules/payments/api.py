@@ -116,6 +116,7 @@ async def refund_payment(
     result = await service.refund_payment(
         payment_id,
         actor_id=actor.id,
+        actor_role=actor.role,
         idempotency_key=idempotency_key,
     )
     response.status_code = status.HTTP_201_CREATED if result.created else status.HTTP_200_OK

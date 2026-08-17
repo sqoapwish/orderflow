@@ -10,13 +10,16 @@ from orderflow.core.config import Settings
 from orderflow.core.correlation import correlation_id_middleware
 from orderflow.core.errors import register_error_handlers
 from orderflow.core.logging import configure_logging
+from orderflow.core.metrics import MetricsRegistry, OutboxMetricsProvider, build_metrics_middleware
 from orderflow.infrastructure.health import InfrastructureReadinessChecker, ReadinessChecker
+from orderflow.infrastructure.metrics import DatabaseOutboxMetricsProvider
 from orderflow.infrastructure.resources import InfrastructureResources
 
 
 def create_app(
     settings: Settings | None = None,
     readiness_checker: ReadinessChecker | None = None,
+    outbox_metrics_provider: OutboxMetricsProvider | None = None,
 ) -> FastAPI:
     resolved_settings = settings or Settings()
     configure_logging(resolved_settings.log_level)
@@ -25,6 +28,10 @@ def create_app(
         resolved_settings,
         resources.database,
         resources.redis,
+    )
+    metrics_registry = MetricsRegistry()
+    resolved_metrics_provider = outbox_metrics_provider or DatabaseOutboxMetricsProvider(
+        resources.database
     )
 
     @asynccontextmanager
@@ -49,6 +56,9 @@ def create_app(
     app.state.settings = resolved_settings
     app.state.resources = resources
     app.state.readiness_checker = resolved_readiness_checker
+    app.state.metrics_registry = metrics_registry
+    app.state.outbox_metrics_provider = resolved_metrics_provider
+    app.middleware("http")(build_metrics_middleware(metrics_registry))
     app.middleware("http")(correlation_id_middleware)
     register_error_handlers(app)
     app.include_router(build_api_router(resolved_settings))

@@ -243,6 +243,8 @@ class PaymentService:
                     payload={
                         "order_id": str(order_bundle.order.id),
                         "customer_id": str(order_bundle.order.customer_id),
+                        "actor_id": str(requester_id),
+                        "actor_role": requester_role.value,
                         "status": order_bundle.order.status.value,
                         "payment_id": (
                             str(payment_bundle.payment.id) if payment_bundle is not None else None
@@ -265,6 +267,7 @@ class PaymentService:
         payment_id: UUID,
         *,
         actor_id: UUID,
+        actor_role: UserRole,
         idempotency_key: str,
     ) -> PaymentMutationResult:
         key = self._validate_key(idempotency_key)
@@ -320,6 +323,7 @@ class PaymentService:
                         "currency": refund.currency,
                         "status": payment.status.value,
                         "actor_id": str(actor_id),
+                        "actor_role": actor_role.value,
                     },
                 )
             )
