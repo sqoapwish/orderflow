@@ -22,7 +22,7 @@ from orderflow.modules.payments.models import Payment, PaymentRefund, PaymentWeb
 def test_alembic_has_exactly_one_head() -> None:
     script = ScriptDirectory.from_config(Config("alembic.ini"))
 
-    assert script.get_heads() == ["20260817_0008"]
+    assert script.get_heads() == ["20260817_0009"]
 
 
 def test_user_role_check_constraint_is_explicit_and_named() -> None:
@@ -242,6 +242,7 @@ def test_outbox_constraints_and_indexes_are_explicit_and_named() -> None:
     }
     assert {index.name for index in outbox_table.indexes} == {
         "ix_outbox_events_aggregate",
+        "ix_outbox_events_analytics",
         "ix_outbox_events_dispatch",
     }
     assert {index.name for index in inbox_table.indexes} == set()

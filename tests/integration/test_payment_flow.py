@@ -304,6 +304,46 @@ async def test_payment_lifecycle_is_atomic_and_idempotent_with_postgresql() -> N
         assert stock.json()["items"][0]["on_hand"] == 3
         assert stock.json()["items"][0]["reserved"] == 0
 
+        today = datetime.now(UTC).date().isoformat()
+        await resources.redis.delete(
+            f"orderflow:analytics:v1:sales:{today}:{today}",
+            f"orderflow:analytics:v1:top-products:{today}:{today}:100",
+        )
+        sales = await client.get(
+            "/api/v1/analytics/sales",
+            headers=manager_headers,
+            params={"date_from": today, "date_to": today},
+        )
+        top_products = await client.get(
+            "/api/v1/analytics/products/top",
+            headers=manager_headers,
+            params={"date_from": today, "date_to": today, "limit": 100},
+        )
+        low_stock = await client.get(
+            "/api/v1/analytics/inventory/low-stock",
+            headers=manager_headers,
+            params={
+                "threshold": 3,
+                "warehouse_id": warehouse_id,
+                "page_size": 100,
+            },
+        )
+        assert sales.status_code == 200, sales.text
+        rub_sales = next(row for row in sales.json()["currencies"] if row["currency"] == "RUB")
+        assert rub_sales["gross_revenue_minor"] >= 20_000
+        assert rub_sales["refunded_amount_minor"] >= 20_000
+        assert rub_sales["failed_payments"] >= 1
+        assert top_products.status_code == 200, top_products.text
+        scenario_product = next(
+            row for row in top_products.json()["items"] if row["product_id"] == product_id
+        )
+        assert scenario_product["paid_quantity"] >= 2
+        assert low_stock.status_code == 200, low_stock.text
+        scenario_stock = next(
+            row for row in low_stock.json()["items"] if row["product_id"] == product_id
+        )
+        assert scenario_stock["available"] == 3
+
         assert (
             await client.get(f"/api/v1/orders/{paid_order['id']}", headers=paid_headers)
         ).json()["status"] == "refunded"

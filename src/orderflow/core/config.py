@@ -43,6 +43,7 @@ class Settings(BaseSettings):
     outbox_max_attempts: int = Field(default=5, ge=1, le=20)
     outbox_retry_base_seconds: int = Field(default=5, ge=1, le=3600)
     outbox_retry_max_seconds: int = Field(default=300, ge=1, le=86400)
+    analytics_cache_ttl_seconds: int = Field(default=30, ge=1, le=3600)
 
     jwt_secret: SecretStr = SecretStr(LOCAL_JWT_SECRET)
     jwt_issuer: str = "orderflow"
