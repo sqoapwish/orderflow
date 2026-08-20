@@ -8,6 +8,7 @@ from sqlalchemy.exc import IntegrityError
 from orderflow.modules.inventory.domain import (
     InventoryMovementType,
     MovementFilters,
+    ProductAvailability,
     ReservationStatus,
     StockFilters,
     WarehouseUpdateFields,
@@ -82,6 +83,12 @@ class InventoryService:
 
     async def list_warehouses(self) -> list[Warehouse]:
         return await self._repository.list_warehouses()
+
+    async def list_product_availability(
+        self,
+        product_id: UUID,
+    ) -> list[ProductAvailability]:
+        return await self._repository.list_product_availability(product_id)
 
     async def require_active_warehouse(self, warehouse_id: UUID) -> None:
         await self._lock_warehouses([warehouse_id], require_active=True)
