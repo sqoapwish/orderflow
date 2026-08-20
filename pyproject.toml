@@ -1,5 +1,5 @@
 [build-system]
-requires = ["hatchling>=1.27,<2"]
+requires = ["hatchling>=1.32.0,<2"]
 build-backend = "hatchling.build"
 
 [project]
@@ -9,31 +9,31 @@ description = "Order and inventory backend with reliable payment and event workf
 readme = "README.md"
 requires-python = ">=3.12,<3.14"
 dependencies = [
-    "aio-pika>=9.5,<10",
-    "alembic>=1.17,<2",
+    "aio-pika>=10.0.1,<11",
+    "alembic>=1.19.1,<2",
     "argon2-cffi>=25.1,<26",
-    "asyncpg>=0.30,<1",
-    "celery>=5.6,<6",
+    "asyncpg>=0.31.0,<1",
+    "celery>=5.6.3,<6",
     "email-validator>=2.3,<3",
-    "fastapi>=0.140,<1",
-    "greenlet==3.2.4",
-    "pyjwt>=2.10,<3",
-    "pydantic-settings>=2.11,<3",
-    "redis>=7,<8",
-    "sqlalchemy[asyncio]>=2.0.50,<3",
-    "structlog>=25.5,<26",
-    "uvicorn[standard]>=0.40,<1",
+    "fastapi>=0.141.1,<1",
+    "greenlet==3.5.5",
+    "pyjwt>=2.13.0,<3",
+    "pydantic-settings>=2.15.0,<3",
+    "redis>=8.1.0,<9",
+    "sqlalchemy[asyncio]>=2.0.52,<3",
+    "structlog>=26.1.0,<27",
+    "uvicorn[standard]>=0.52.3,<1",
 ]
 
 [dependency-groups]
 dev = [
     "asgi-lifespan>=2.1,<3",
-    "httpx>=0.28,<1",
-    "mypy>=1.19,<2",
-    "pytest>=9,<10",
-    "pytest-asyncio>=1.3,<2",
-    "pytest-cov>=7,<8",
-    "ruff>=0.16,<1",
+    "httpx>=0.28.1,<1",
+    "mypy>=2.3.1,<3",
+    "pytest>=9.1.1,<10",
+    "pytest-asyncio>=1.4.0,<2",
+    "pytest-cov>=7.1.0,<8",
+    "ruff>=0.16.3,<1",
 ]
 
 [tool.hatch.build.targets.wheel]
