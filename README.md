@@ -2,12 +2,17 @@
 
 [![CI](https://github.com/sqoapwish/orderflow/actions/workflows/ci.yml/badge.svg)](https://github.com/sqoapwish/orderflow/actions/workflows/ci.yml)
 
-OrderFlow — backend-система управления заказами, оплатами и складскими остатками интернет-магазина. Проект развивается как модульный монолит уровня strong Junior+ с отдельными инженерными решениями уровня Middle: конкурентным резервированием товара, идемпотентностью, подписанными webhooks, Transactional Outbox, аудитом и наблюдаемостью.
+OrderFlow — полнофункциональный MVP управления заказами, оплатами и складскими остатками интернет-магазина. FastAPI-бэкенд и Next.js-интерфейс объединяют покупательский и операционный сценарии, а надёжность обеспечивают конкурентное резервирование, идемпотентность, подписанные webhooks, Transactional Outbox, аудит и наблюдаемость.
 
-> Текущий статус: завершены инженерная основа, аутентификация, каталог, складской учёт, корзина, транзакционное оформление заказа, Mock Payment lifecycle, Transactional Outbox, неизменяемый аудит, операционные метрики и backend-аналитика. Следующий этап — минимальный демонстрационный интерфейс; сейчас UI в проекте ещё нет. Возможности не отмечаются готовыми до реализации и тестирования.
+> Текущий статус: версия `1.0.0`, демонстрационный MVP завершён. Покупатель может пройти путь от регистрации и каталога до checkout и платёжной сессии; менеджер получает заказы, аналитику и склад, администратор — аудит. Реальный банковский эквайринг намеренно заменён воспроизводимым Mock Payment Provider.
 
 ## Что уже работает
 
+- адаптивный Next.js-интерфейс на русском языке в едином визуальном стиле;
+- покупательский путь: регистрация, вход, каталог, выбор склада, корзина и checkout;
+- операционные экраны: заказы, аналитический dashboard, остатки и аудит;
+- автоматическое обновление access-токена по ротационному refresh-токену;
+- same-origin BFF-прокси между браузером и FastAPI без публикации внутреннего адреса API;
 - FastAPI с версионированием `/api/v1` и OpenAPI/Swagger;
 - регистрация, вход, выход и получение текущего пользователя;
 - access/refresh JWT, серверные сессии, ротация refresh-токенов и защита от их повторного использования;
@@ -55,11 +60,14 @@ OrderFlow — backend-система управления заказами, оп
 - Docker Compose с health checks и отдельной тестовой БД;
 - Ruff, mypy, Pytest и integration-тест инфраструктуры;
 - GitHub Actions: качество, тесты, миграции, Docker build и поиск секретов;
-- Dependabot для Python, GitHub Actions и Docker-образов.
+- Dependabot для Python, npm, GitHub Actions и Docker-образов.
 
-## Планируемые бизнес-возможности
+## Границы MVP
 
-- минимальный демонстрационный интерфейс.
+- платёжная сессия создаётся в Mock Payment Provider и не принимает реальные платёжные данные;
+- публичная регистрация безопасно создаёт только роль `customer`;
+- наполнение каталога и назначение ролей выполняются через защищённый API или административные инструменты, а не через публичный интерфейс;
+- UI показывает основные рабочие сценарии, но не заменяет специализированную ERP/WMS.
 
 ## Архитектура
 
@@ -67,7 +75,9 @@ OrderFlow — backend-система управления заказами, оп
 
 ```mermaid
 flowchart TD
-    Client["Клиент или менеджер"] --> API["FastAPI API"]
+    Client["Клиент или менеджер"] --> Web["Next.js UI"]
+    Web --> Proxy["Same-origin API proxy"]
+    Proxy --> API["FastAPI API"]
     API --> Modules["Доменные модули"]
     Modules --> PostgreSQL["PostgreSQL"]
     Modules --> Redis["Redis"]
@@ -91,6 +101,7 @@ flowchart TD
 | Область | Технологии |
 |---|---|
 | API | Python 3.12, FastAPI, Pydantic, PyJWT |
+| Интерфейс | Next.js 16, React 19, TypeScript 5.9, CSS |
 | Данные | PostgreSQL 17, SQLAlchemy 2 async, asyncpg, Alembic |
 | Безопасность | Argon2id, access/refresh JWT, серверные сессии и RBAC |
 | Кэш и очередь | Redis 8, RabbitMQ 4, Celery 5 |
@@ -98,7 +109,7 @@ flowchart TD
 | Инфраструктура | Docker, Docker Compose, GitHub Actions, uv |
 | Диагностика | JSON-логи, Correlation ID, health checks, Prometheus metrics |
 
-Точные совместимые версии всех Python-зависимостей зафиксированы в `uv.lock`.
+Точные совместимые версии зависимостей зафиксированы в `uv.lock` и `frontend/package-lock.json`.
 
 ## Быстрый запуск через Docker
 
@@ -110,6 +121,7 @@ PowerShell:
 Copy-Item .env.example .env
 docker compose up --build -d
 docker compose ps
+docker compose exec api python scripts/seed_demo.py
 ```
 
 Prometheus подключается отдельным профилем и не расходует ресурсы при обычном запуске:
@@ -123,11 +135,17 @@ docker compose --profile monitoring up --build -d
 
 После запуска:
 
+- интерфейс: <http://localhost:3000>
 - Swagger: <http://localhost:8002/docs>
 - liveness: <http://localhost:8002/api/v1/health/live>
 - readiness: <http://localhost:8002/api/v1/health/ready>
 - RabbitMQ UI: <http://localhost:15673>
 - PostgreSQL для DBeaver: `localhost:5435`
+
+Последняя команда создаёт локальные товары, склад и три тестовых аккаунта и печатает данные для
+входа. Seed идемпотентен и программно запрещён в `staging` и `production`; пароли можно переопределить
+через `ORDERFLOW_DEMO_CUSTOMER_PASSWORD`, `ORDERFLOW_DEMO_MANAGER_PASSWORD` и
+`ORDERFLOW_DEMO_ADMIN_PASSWORD`.
 
 ## Аутентификация
 
@@ -162,10 +180,11 @@ docker compose --profile monitoring up --build -d
 
 ## Складской учёт
 
-Все endpoint складского модуля требуют роль `manager` или `admin`.
+Операционные endpoint складского модуля требуют роль `manager` или `admin`. Публичное чтение доступности конкретного активного товара используется каталогом и не изменяет данные.
 
 | Метод | Endpoint | Назначение |
 |---|---|---|
+| `GET` | `/api/v1/inventory/availability/{product_id}` | Публичные доступные остатки активного товара по активным складам |
 | `GET/POST` | `/api/v1/inventory/warehouses` | Список и создание складов |
 | `PATCH/DELETE` | `/api/v1/inventory/warehouses/{warehouse_id}` | Изменение и архивирование пустого склада |
 | `GET` | `/api/v1/inventory/stock` | Остатки с фильтрацией и пагинацией |
@@ -299,6 +318,18 @@ dispatcher и consumer сохраняются `event_id`, тип события 
 `orderflow_outbox_metrics_scrape_success 0`. В production доступ к `/metrics` следует ограничить
 на уровне внутренней сети или reverse proxy.
 
+## Интерфейс
+
+Next.js-приложение находится в `frontend/`. Браузер обращается только к относительному адресу
+`/api/v1`; Route Handler проксирует запросы во внутренний FastAPI URL из
+`ORDERFLOW_API_INTERNAL_URL`. В Docker Compose API остаётся доступен как `http://api:8000`, а
+пользователь открывает единый origin `http://localhost:3000`. Отдельная CORS-конфигурация не нужна.
+
+Интерфейс выбирает навигацию по текущей роли. `customer` видит каталог, корзину и свои заказы;
+`manager` — dashboard, все заказы и склад; `admin` дополнительно получает аудит. Access/refresh
+токены хранятся только в `sessionStorage`, очищаются при закрытии вкладки и автоматически
+обновляются один раз после ответа `401`.
+
 Логи и остановка:
 
 ```powershell
@@ -308,12 +339,23 @@ docker compose down
 
 ## Локальная разработка
 
-Требования: Python 3.12 и [uv](https://docs.astral.sh/uv/).
+Требования: Python 3.12, [uv](https://docs.astral.sh/uv/) и Node.js 24.
 
 ```bash
 uv sync --frozen
 uv run uvicorn orderflow.main:app --reload --port 8002
 ```
+
+Во втором терминале:
+
+```bash
+cd frontend
+npm ci
+npm run dev
+```
+
+Интерфейс откроется на <http://localhost:3000> и по умолчанию будет проксировать API на
+`http://localhost:8002`.
 
 Без запущенной инфраструктуры `/live` вернёт `200`, а `/ready` — `503` с состояниями компонентов. Это ожидаемое поведение: процесс жив, но ещё не готов принимать рабочую нагрузку.
 
@@ -322,10 +364,16 @@ uv run uvicorn orderflow.main:app --reload --port 8002
 ```bash
 uv run ruff format --check .
 uv run ruff check .
-uv run mypy src tests
+uv run mypy src tests scripts/seed_demo.py
 uv run pytest -m "not integration"
 uv run pytest --cov=orderflow --cov-report=term-missing
 uv run alembic heads
+
+cd frontend
+npm run lint
+npm run typecheck
+npm test
+npm run build
 ```
 
 Integration-тесты проверяют инфраструктуру, полный auth-flow, каталог, конкурентные складские резервы, идемпотентный checkout, полный платёжный lifecycle, атомарное появление Outbox-событий, общий commit Inbox с аудитом, запрет изменения истории и аналитические отчёты на настоящем PostgreSQL. В CI PostgreSQL, Redis и RabbitMQ поднимаются автоматически.
@@ -353,6 +401,7 @@ uv run alembic check
 ## Структура
 
 ```text
+frontend/                 # Next.js UI и same-origin proxy к API
 src/orderflow/
 ├── api/             # HTTP-маршруты и версионирование
 ├── core/            # настройки, ошибки, логирование, Correlation ID

@@ -30,6 +30,10 @@ Thumbs.db
 build/
 dist/
 
+# Frontend dependencies and Next.js output
+node_modules/
+.next/
+*.tsbuildinfo
+
 # Local user uploads and scratch artifacts
 upload/
-
