@@ -1,8 +1,9 @@
 "use client";
 
-import { type FormEvent, useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 import { apiRequest } from "@/lib/api";
+import { cartItemsForProduct, preferredAvailability, productCartQuantity } from "@/lib/catalog";
 import { formatMoney } from "@/lib/format";
 import type {
   Cart,
@@ -13,28 +14,25 @@ import type {
   User,
 } from "@/lib/types";
 
-import type { Screen } from "../app-shell";
 import { EmptyState, ErrorState, Icon, LoadingBlock, ProductMark } from "../ui";
 
 export function CatalogScreen({
   user,
   requestAuth,
-  onNavigate,
 }: {
   user: User | null;
   requestAuth: () => void;
-  onNavigate: (screen: Screen) => void;
 }) {
   const [products, setProducts] = useState<Product[]>([]);
+  const [cart, setCart] = useState<Cart | null>(null);
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
+  const [cartLoading, setCartLoading] = useState(false);
   const [error, setError] = useState("");
-  const [selected, setSelected] = useState<Product | null>(null);
-  const [availability, setAvailability] = useState<ProductAvailability[]>([]);
-  const [warehouseId, setWarehouseId] = useState("");
-  const [quantity, setQuantity] = useState(1);
-  const [adding, setAdding] = useState(false);
-  const [modalLoading, setModalLoading] = useState(false);
+  const [busyProductId, setBusyProductId] = useState("");
+  const [availabilityByProduct, setAvailabilityByProduct] = useState<
+    Record<string, ProductAvailability[]>
+  >({});
 
   const loadProducts = useCallback(async (query = "") => {
     setLoading(true);
@@ -56,48 +54,104 @@ export function CatalogScreen({
     return () => window.clearTimeout(timer);
   }, [loadProducts]);
 
-  async function openProduct(product: Product) {
+  const loadCart = useCallback(async () => {
+    if (!user || user.role !== "customer") {
+      setCart(null);
+      setCartLoading(false);
+      return;
+    }
+
+    setCartLoading(true);
+    try {
+      setCart(await apiRequest<Cart>("/cart"));
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Не удалось получить корзину");
+    } finally {
+      setCartLoading(false);
+    }
+  }, [user]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => void loadCart(), 0);
+    return () => window.clearTimeout(timer);
+  }, [loadCart]);
+
+  async function getAvailability(productId: string): Promise<ProductAvailability[]> {
+    const cached = availabilityByProduct[productId];
+    if (cached) return cached;
+
+    const response = await apiRequest<ProductAvailabilityList>(
+      `/inventory/availability/${productId}`,
+      {},
+      { auth: false },
+    );
+    setAvailabilityByProduct((current) => ({ ...current, [productId]: response.items }));
+    return response.items;
+  }
+
+  async function changeCartQuantity(product: Product, change: -1 | 1) {
     if (!user) {
       requestAuth();
       return;
     }
     if (user.role !== "customer") return;
-    setSelected(product);
-    setModalLoading(true);
-    setQuantity(1);
-    setAvailability([]);
-    setWarehouseId("");
-    try {
-      const response = await apiRequest<ProductAvailabilityList>(
-        `/inventory/availability/${product.id}`,
-        {},
-        { auth: false },
-      );
-      setAvailability(response.items);
-      setWarehouseId(response.items[0]?.warehouse_id ?? "");
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Не удалось получить остатки");
-      setSelected(null);
-    } finally {
-      setModalLoading(false);
-    }
-  }
 
-  async function addToCart(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!selected || !warehouseId) return;
-    setAdding(true);
+    setBusyProductId(product.id);
+    setError("");
     try {
-      await apiRequest<Cart>("/cart/items", {
-        method: "POST",
-        body: JSON.stringify({ product_id: selected.id, warehouse_id: warehouseId, quantity }),
-      });
-      setSelected(null);
-      onNavigate("cart");
+      const productItems = cartItemsForProduct(cart, product.id);
+      const existingItem = productItems[0];
+
+      if (change === -1) {
+        if (!existingItem) return;
+        const updatedCart =
+          existingItem.quantity === 1
+            ? await apiRequest<Cart>(`/cart/items/${existingItem.id}`, { method: "DELETE" })
+            : await apiRequest<Cart>(`/cart/items/${existingItem.id}`, {
+                method: "PATCH",
+                body: JSON.stringify({ quantity: existingItem.quantity - 1 }),
+              });
+        setCart(updatedCart);
+        return;
+      }
+
+      const availability = await getAvailability(product.id);
+      if (existingItem) {
+        const warehouse = availability.find(
+          (item) => item.warehouse_id === existingItem.warehouse_id,
+        );
+        if (!warehouse || existingItem.quantity >= warehouse.available) {
+          setError("На выбранном складе больше нет доступного количества этого товара");
+          return;
+        }
+        setCart(
+          await apiRequest<Cart>(`/cart/items/${existingItem.id}`, {
+            method: "PATCH",
+            body: JSON.stringify({ quantity: existingItem.quantity + 1 }),
+          }),
+        );
+        return;
+      }
+
+      const warehouse = preferredAvailability(availability);
+      if (!warehouse) {
+        setError("Товара сейчас нет в наличии");
+        return;
+      }
+      setCart(
+        await apiRequest<Cart>("/cart/items", {
+          method: "POST",
+          body: JSON.stringify({
+            product_id: product.id,
+            warehouse_id: warehouse.warehouse_id,
+            quantity: 1,
+          }),
+        }),
+      );
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Не удалось добавить товар");
+      setError(caught instanceof Error ? caught.message : "Не удалось изменить корзину");
     } finally {
-      setAdding(false);
+      setBusyProductId("");
     }
   }
 
@@ -132,7 +186,15 @@ export function CatalogScreen({
         </form>
       </section>
 
-      {error ? <ErrorState message={error} retry={() => void loadProducts(search)} /> : null}
+      {error ? (
+        <ErrorState
+          message={error}
+          retry={() => {
+            void loadProducts(search);
+            void loadCart();
+          }}
+        />
+      ) : null}
       {loading ? (
         <LoadingBlock label="Загружаем каталог" />
       ) : products.length === 0 ? (
@@ -142,90 +204,66 @@ export function CatalogScreen({
         />
       ) : (
         <section className="product-grid" aria-label="Каталог товаров">
-          {products.map((product) => (
-            <article className="product-card" key={product.id}>
-              <div className="product-visual">
-                <ProductMark name={product.name} imageUrl={product.image_url} />
-                <span className="sku-chip">{product.sku}</span>
-              </div>
-              <div className="product-body">
-                <h2>{product.name}</h2>
-                <p>{product.description || "Надёжный товар из каталога OrderFlow."}</p>
-                <div className="product-footer">
-                  <strong>{formatMoney(product.price_minor, product.currency)}</strong>
-                  {canBuy ? (
-                    <button className="button button-primary" type="button" onClick={() => void openProduct(product)}>
-                      <Icon name="cart" size={17} />
-                      В корзину
-                    </button>
-                  ) : (
-                    <span className="manager-note">Просмотр менеджера</span>
-                  )}
+          {products.map((product) => {
+            const quantity = productCartQuantity(cart, product.id);
+            const controlsDisabled = cartLoading || busyProductId !== "";
+            return (
+              <article className="product-card" key={product.id}>
+                <div className="product-visual">
+                  <ProductMark name={product.name} imageUrl={product.image_url} />
+                  <span className="sku-chip">{product.sku}</span>
                 </div>
-              </div>
-            </article>
-          ))}
+                <div className="product-body">
+                  <h2>{product.name}</h2>
+                  <p>{product.description || "Надёжный товар из каталога OrderFlow."}</p>
+                  <div className="product-footer">
+                    <strong>{formatMoney(product.price_minor, product.currency)}</strong>
+                    {!canBuy ? (
+                      <span className="manager-note">Просмотр менеджера</span>
+                    ) : quantity > 0 ? (
+                      <div className="catalog-quantity" aria-label={`${product.name} в корзине`}>
+                        <button
+                          aria-label={`Уменьшить количество ${product.name}`}
+                          disabled={controlsDisabled}
+                          type="button"
+                          onClick={() => void changeCartQuantity(product, -1)}
+                        >
+                          −
+                        </button>
+                        <span aria-live="polite">
+                          {busyProductId === product.id ? "…" : quantity}
+                        </span>
+                        <button
+                          aria-label={`Увеличить количество ${product.name}`}
+                          disabled={controlsDisabled}
+                          type="button"
+                          onClick={() => void changeCartQuantity(product, 1)}
+                        >
+                          +
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        className="button button-primary"
+                        disabled={controlsDisabled}
+                        type="button"
+                        onClick={() => void changeCartQuantity(product, 1)}
+                      >
+                        <Icon name="cart" size={17} />
+                        {cartLoading && user?.role === "customer"
+                          ? "Загружаем…"
+                          : busyProductId === product.id
+                            ? "Добавляем…"
+                            : "В корзину"}
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </article>
+            );
+          })}
         </section>
       )}
-
-      {selected ? (
-        <div className="modal-backdrop" role="presentation" onMouseDown={() => setSelected(null)}>
-          <section
-            aria-labelledby="product-dialog-title"
-            aria-modal="true"
-            className="product-dialog"
-            role="dialog"
-            onMouseDown={(event) => event.stopPropagation()}
-          >
-            <button className="icon-button modal-close" aria-label="Закрыть" onClick={() => setSelected(null)}>
-              <Icon name="x" />
-            </button>
-            <div className="dialog-product-row">
-              <ProductMark name={selected.name} imageUrl={selected.image_url} />
-              <div>
-                <span className="eyebrow">{selected.sku}</span>
-                <h2 id="product-dialog-title">{selected.name}</h2>
-                <strong>{formatMoney(selected.price_minor, selected.currency)}</strong>
-              </div>
-            </div>
-            {modalLoading ? (
-              <LoadingBlock label="Проверяем остатки" />
-            ) : availability.length === 0 ? (
-              <EmptyState
-                icon="warehouse"
-                title="Нет в наличии"
-                text="На активных складах сейчас нет доступного количества."
-              />
-            ) : (
-              <form className="add-form" onSubmit={addToCart}>
-                <label>
-                  Склад
-                  <select value={warehouseId} onChange={(event) => setWarehouseId(event.target.value)}>
-                    {availability.map((item) => (
-                      <option key={item.warehouse_id} value={item.warehouse_id}>
-                        {item.warehouse_name} · доступно {item.available}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label>
-                  Количество
-                  <input
-                    min="1"
-                    max={availability.find((item) => item.warehouse_id === warehouseId)?.available ?? 1}
-                    type="number"
-                    value={quantity}
-                    onChange={(event) => setQuantity(Number(event.target.value))}
-                  />
-                </label>
-                <button className="button button-primary button-full" disabled={adding} type="submit">
-                  {adding ? "Добавляем…" : "Добавить в корзину"}
-                </button>
-              </form>
-            )}
-          </section>
-        </div>
-      ) : null}
     </div>
   );
 }

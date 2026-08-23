@@ -47,7 +47,7 @@ export function OrderFlowApp() {
   else if (screen === "orders") content = <OrdersScreen user={user} />;
   else if (screen === "warehouse") content = <WarehouseScreen user={user} />;
   else if (screen === "audit") content = <AuditScreen user={user} />;
-  else content = <CatalogScreen user={user} requestAuth={() => openAuth("login")} onNavigate={navigate} />;
+  else content = <CatalogScreen user={user} requestAuth={() => openAuth("login")} />;
 
   return (
     <AppShell
