@@ -30,6 +30,12 @@ class DemoProduct:
     quantity: int
 
 
+DEMO_CUSTOMER_EMAIL = "customer@orderflow.example.com"
+DEMO_MANAGER_EMAIL = "manager@orderflow.example.com"
+DEMO_ADMIN_EMAIL = "admin@orderflow.example.com"
+DEMO_USER_EMAILS = (DEMO_CUSTOMER_EMAIL, DEMO_MANAGER_EMAIL, DEMO_ADMIN_EMAIL)
+
+
 DEMO_PRODUCTS = (
     DemoProduct(
         name="Ежедневник Focus",
@@ -102,21 +108,21 @@ async def seed() -> None:
         async with database.session_factory() as session:
             await seed_user(
                 session,
-                email="customer@orderflow.local",
+                email=DEMO_CUSTOMER_EMAIL,
                 password=customer_password,
                 role=UserRole.CUSTOMER,
                 passwords=passwords,
             )
             manager = await seed_user(
                 session,
-                email="manager@orderflow.local",
+                email=DEMO_MANAGER_EMAIL,
                 password=manager_password,
                 role=UserRole.MANAGER,
                 passwords=passwords,
             )
             await seed_user(
                 session,
-                email="admin@orderflow.local",
+                email=DEMO_ADMIN_EMAIL,
                 password=admin_password,
                 role=UserRole.ADMIN,
                 passwords=passwords,
@@ -189,9 +195,9 @@ async def seed() -> None:
         await database.close()
 
     print("OrderFlow demo data is ready")
-    print(f"customer@orderflow.local / {customer_password}")
-    print(f"manager@orderflow.local / {manager_password}")
-    print(f"admin@orderflow.local / {admin_password}")
+    print(f"{DEMO_CUSTOMER_EMAIL} / {customer_password}")
+    print(f"{DEMO_MANAGER_EMAIL} / {manager_password}")
+    print(f"{DEMO_ADMIN_EMAIL} / {admin_password}")
 
 
 if __name__ == "__main__":
