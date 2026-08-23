@@ -1,10 +1,10 @@
-FROM node:24.11-alpine AS dependencies
+FROM node:26.7-alpine AS dependencies
 
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci
 
-FROM node:24.11-alpine AS builder
+FROM node:26.7-alpine AS builder
 
 WORKDIR /app
 ENV NEXT_TELEMETRY_DISABLED=1
@@ -12,7 +12,7 @@ COPY --from=dependencies /app/node_modules ./node_modules
 COPY . .
 RUN npm run build
 
-FROM node:24.11-alpine AS runtime
+FROM node:26.7-alpine AS runtime
 
 WORKDIR /app
 ENV NODE_ENV=production \
