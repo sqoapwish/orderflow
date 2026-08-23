@@ -195,6 +195,20 @@ async def test_payment_lifecycle_is_atomic_and_idempotent_with_postgresql() -> N
         )
         assert receipt.status_code == 201, receipt.text
 
+        availability = await client.get(f"/api/v1/inventory/availability/{product_id}")
+        assert availability.status_code == 200, availability.text
+        assert availability.json() == {
+            "items": [
+                {
+                    "warehouse_id": warehouse_id,
+                    "warehouse_name": f"Payments {suffix}",
+                    "warehouse_code": f"PAY-{suffix.upper()}",
+                    "available": 5,
+                }
+            ],
+            "total": 1,
+        }
+
         paid_order = await create_order(
             client,
             paid_headers,

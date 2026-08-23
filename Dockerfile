@@ -20,7 +20,8 @@ RUN uv sync --frozen --no-dev --no-editable
 COPY alembic.ini ./
 COPY migrations ./migrations
 COPY scripts ./scripts
-RUN chmod +x scripts/docker-entrypoint.sh \
+RUN sed -i 's/\r$//' scripts/docker-entrypoint.sh \
+    && chmod +x scripts/docker-entrypoint.sh \
     && chown -R orderflow:orderflow /app
 
 USER orderflow
@@ -29,4 +30,3 @@ EXPOSE 8000
 
 ENTRYPOINT ["./scripts/docker-entrypoint.sh"]
 CMD ["uvicorn", "orderflow.main:app", "--host", "0.0.0.0", "--port", "8000"]
-

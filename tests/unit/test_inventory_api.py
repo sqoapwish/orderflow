@@ -256,6 +256,15 @@ async def test_inventory_access_validation_and_standard_errors(
     assert invalid_transfer.json()["error"]["code"] == "validation_error"
 
 
+async def test_product_availability_is_public(inventory_api: InventoryApiContext) -> None:
+    response = await inventory_api.client.get(
+        f"/api/v1/inventory/availability/{inventory_api.product_id}"
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"items": [], "total": 0}
+
+
 async def test_inventory_openapi_contract_is_protected(
     inventory_api: InventoryApiContext,
 ) -> None:
@@ -263,6 +272,7 @@ async def test_inventory_openapi_contract_is_protected(
     assert response.status_code == 200
     paths = response.json()["paths"]
     expected_paths = {
+        "/api/v1/inventory/availability/{product_id}",
         "/api/v1/inventory/warehouses",
         "/api/v1/inventory/warehouses/{warehouse_id}",
         "/api/v1/inventory/stock",
@@ -278,6 +288,8 @@ async def test_inventory_openapi_contract_is_protected(
     }
 
     assert expected_paths <= set(paths)
-    for path in expected_paths:
+    protected_paths = expected_paths - {"/api/v1/inventory/availability/{product_id}"}
+    for path in protected_paths:
         for operation in paths[path].values():
             assert operation["security"] == [{"HTTPBearer": []}]
+    assert paths["/api/v1/inventory/availability/{product_id}"]["get"].get("security") is None

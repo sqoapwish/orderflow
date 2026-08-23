@@ -23,7 +23,12 @@ from orderflow.modules.catalog.domain import ProductFilters, ProductSortField, S
 from orderflow.modules.catalog.errors import ProductNotFoundError
 from orderflow.modules.catalog.models import Category, Product
 from orderflow.modules.catalog.service import CatalogService
-from orderflow.modules.inventory.domain import MovementFilters, ReservationStatus, StockFilters
+from orderflow.modules.inventory.domain import (
+    MovementFilters,
+    ProductAvailability,
+    ReservationStatus,
+    StockFilters,
+)
 from orderflow.modules.inventory.models import (
     InventoryMovement,
     InventoryReservation,
@@ -295,6 +300,7 @@ class FakeInventoryRepository:
         self.reservations: dict[UUID, InventoryReservation] = {}
         self.reservations_by_key: dict[str, InventoryReservation] = {}
         self.reservation_key_locks: list[str] = []
+        self.availability: dict[UUID, list[ProductAvailability]] = {}
         self.commits = 0
         self.rollbacks = 0
 
@@ -302,6 +308,12 @@ class FakeInventoryRepository:
         return sorted(
             self.warehouses.values(), key=lambda warehouse: (warehouse.name, warehouse.id)
         )
+
+    async def list_product_availability(
+        self,
+        product_id: UUID,
+    ) -> list[ProductAvailability]:
+        return self.availability.get(product_id, [])
 
     async def lock_warehouses(self, warehouse_ids: Iterable[UUID]) -> list[Warehouse]:
         ids = sorted(set(warehouse_ids), key=lambda warehouse_id: warehouse_id.int)

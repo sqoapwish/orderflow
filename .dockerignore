@@ -15,4 +15,5 @@ dist
 htmlcov
 tests
 upload
-
+frontend/node_modules
+frontend/.next

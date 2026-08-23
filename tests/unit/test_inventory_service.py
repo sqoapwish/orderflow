@@ -7,6 +7,7 @@ from orderflow.modules.catalog.errors import ProductNotFoundError
 from orderflow.modules.inventory.domain import (
     InventoryMovementType,
     MovementFilters,
+    ProductAvailability,
     ReservationStatus,
     StockFilters,
 )
@@ -151,6 +152,24 @@ async def test_receipt_write_off_adjustment_transfer_and_history() -> None:
     stock_page = await service.list_stock(StockFilters(product_id=product_id, page_size=1))
     assert stock_page.total == 2
     assert stock_page.total_pages == 2
+
+
+async def test_public_product_availability_is_returned_from_repository() -> None:
+    product_id = uuid4()
+    warehouse_id = uuid4()
+    service, repository, _ = build_inventory_service(product_id)
+    repository.availability[product_id] = [
+        ProductAvailability(
+            warehouse_id=warehouse_id,
+            warehouse_name="Main warehouse",
+            warehouse_code="MAIN",
+            available=7,
+        )
+    ]
+
+    result = await service.list_product_availability(product_id)
+
+    assert result == repository.availability[product_id]
 
 
 async def test_reservation_is_idempotent_and_prevents_overselling() -> None:

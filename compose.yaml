@@ -1,6 +1,28 @@
 name: orderflow
 
 services:
+  frontend:
+    build:
+      context: ./frontend
+    environment:
+      ORDERFLOW_API_INTERNAL_URL: http://api:8000
+    ports:
+      - "${FRONTEND_PORT:-3000}:3000"
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://localhost:3000').then((response) => { if (!response.ok) process.exit(1) }).catch(() => process.exit(1))"
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    restart: unless-stopped
+
   api:
     build:
       context: .
@@ -21,6 +43,9 @@ services:
       ORDERFLOW_OUTBOX_RETRY_BASE_SECONDS: ${ORDERFLOW_OUTBOX_RETRY_BASE_SECONDS:-5}
       ORDERFLOW_OUTBOX_RETRY_MAX_SECONDS: ${ORDERFLOW_OUTBOX_RETRY_MAX_SECONDS:-300}
       ORDERFLOW_ANALYTICS_CACHE_TTL_SECONDS: ${ORDERFLOW_ANALYTICS_CACHE_TTL_SECONDS:-30}
+      ORDERFLOW_DEMO_CUSTOMER_PASSWORD: ${ORDERFLOW_DEMO_CUSTOMER_PASSWORD:-Customer-demo-2026}
+      ORDERFLOW_DEMO_MANAGER_PASSWORD: ${ORDERFLOW_DEMO_MANAGER_PASSWORD:-Manager-demo-2026}
+      ORDERFLOW_DEMO_ADMIN_PASSWORD: ${ORDERFLOW_DEMO_ADMIN_PASSWORD:-Admin-demo-2026}
     ports:
       - "${API_PORT:-8002}:8000"
     depends_on:

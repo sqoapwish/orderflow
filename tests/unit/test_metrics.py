@@ -57,7 +57,7 @@ async def test_metrics_endpoint_exposes_http_and_persistent_outbox_metrics(
     assert metrics.status_code == 200
     assert metrics.headers["content-type"] == "text/plain; version=0.0.4; charset=utf-8"
     body = metrics.text
-    assert 'orderflow_build_info{version="0.9.0"} 1' in body
+    assert 'orderflow_build_info{version="1.0.0"} 1' in body
     assert (
         'orderflow_http_requests_total{method="GET",route="/api/v1/health/live",status="200"} 1'
         in body

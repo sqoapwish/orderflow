@@ -7,7 +7,13 @@ from sqlalchemy.dialects.postgresql import insert as postgresql_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
 
-from orderflow.modules.inventory.domain import MovementFilters, ReservationStatus, StockFilters
+from orderflow.modules.catalog.models import Product
+from orderflow.modules.inventory.domain import (
+    MovementFilters,
+    ProductAvailability,
+    ReservationStatus,
+    StockFilters,
+)
 from orderflow.modules.inventory.models import (
     InventoryMovement,
     InventoryReservation,
@@ -20,6 +26,11 @@ StockKey = tuple[UUID, UUID]
 
 class InventoryRepositoryProtocol(Protocol):
     async def list_warehouses(self) -> list[Warehouse]: ...
+
+    async def list_product_availability(
+        self,
+        product_id: UUID,
+    ) -> list[ProductAvailability]: ...
 
     async def lock_warehouses(self, warehouse_ids: Iterable[UUID]) -> list[Warehouse]: ...
 
@@ -82,6 +93,41 @@ class InventoryRepository:
             select(Warehouse).order_by(Warehouse.name, Warehouse.id)
         )
         return list(result.scalars().all())
+
+    async def list_product_availability(
+        self,
+        product_id: UUID,
+    ) -> list[ProductAvailability]:
+        available = StockBalance.on_hand - StockBalance.reserved
+        rows = (
+            await self._session.execute(
+                select(
+                    Warehouse.id,
+                    Warehouse.name,
+                    Warehouse.code,
+                    available.label("available"),
+                )
+                .select_from(StockBalance)
+                .join(Warehouse, Warehouse.id == StockBalance.warehouse_id)
+                .join(Product, Product.id == StockBalance.product_id)
+                .where(
+                    StockBalance.product_id == product_id,
+                    Product.is_active.is_(True),
+                    Warehouse.is_active.is_(True),
+                    available > 0,
+                )
+                .order_by(available.desc(), Warehouse.name, Warehouse.id)
+            )
+        ).all()
+        return [
+            ProductAvailability(
+                warehouse_id=row.id,
+                warehouse_name=row.name,
+                warehouse_code=row.code,
+                available=row.available,
+            )
+            for row in rows
+        ]
 
     async def lock_warehouses(self, warehouse_ids: Iterable[UUID]) -> list[Warehouse]:
         ordered_ids = sorted(set(warehouse_ids), key=lambda warehouse_id: warehouse_id.int)

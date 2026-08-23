@@ -128,6 +128,20 @@ class WarehouseListResponse(BaseModel):
     total: int
 
 
+class ProductAvailabilityResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    warehouse_id: UUID
+    warehouse_name: str
+    warehouse_code: str
+    available: int
+
+
+class ProductAvailabilityListResponse(BaseModel):
+    items: list[ProductAvailabilityResponse]
+    total: int
+
+
 class StockBalanceResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

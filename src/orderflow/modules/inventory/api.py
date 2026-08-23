@@ -11,6 +11,8 @@ from orderflow.modules.inventory.domain import InventoryMovementType, MovementFi
 from orderflow.modules.inventory.schemas import (
     InventoryMovementResponse,
     MovementPageResponse,
+    ProductAvailabilityListResponse,
+    ProductAvailabilityResponse,
     ReservationCreateRequest,
     ReservationResponse,
     StockAdjustmentRequest,
@@ -40,6 +42,22 @@ def stock_mutation_response(result: StockMutationResult) -> StockMutationRespons
     return StockMutationResponse(
         operation_id=result.operation_id,
         balance=StockBalanceResponse.model_validate(result.balance),
+    )
+
+
+@router.get(
+    "/availability/{product_id}",
+    response_model=ProductAvailabilityListResponse,
+    summary="List public available stock by active warehouse",
+)
+async def list_product_availability(
+    product_id: UUID,
+    service: InventoryServiceDependency,
+) -> ProductAvailabilityListResponse:
+    items = await service.list_product_availability(product_id)
+    return ProductAvailabilityListResponse(
+        items=[ProductAvailabilityResponse.model_validate(item) for item in items],
+        total=len(items),
     )
 
 

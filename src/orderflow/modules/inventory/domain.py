@@ -44,3 +44,11 @@ class MovementFilters:
     product_id: UUID | None = None
     movement_type: InventoryMovementType | None = None
     operation_id: UUID | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class ProductAvailability:
+    warehouse_id: UUID
+    warehouse_name: str
+    warehouse_code: str
+    available: int
