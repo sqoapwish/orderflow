@@ -1,9 +1,10 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { apiRequest } from "@/lib/api";
 import { formatDateTime, formatMoney } from "@/lib/format";
+import { customerVisibleOrders, orderProductSummary } from "@/lib/orders";
 import type { Order, OrderPage, OrderStatus, User } from "@/lib/types";
 
 import { EmptyState, ErrorState, LoadingBlock, StatusBadge } from "../ui";
@@ -23,6 +24,8 @@ export function OrdersScreen({ user }: { user: User | null }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState("");
+  const [notice, setNotice] = useState("");
+  const timers = useRef<number[]>([]);
 
   const loadOrders = useCallback(async (status: "" | OrderStatus) => {
     if (!user) {
@@ -35,7 +38,7 @@ export function OrdersScreen({ user }: { user: User | null }) {
       const params = new URLSearchParams({ page_size: "100" });
       if (status) params.set("status", status);
       const response = await apiRequest<OrderPage>(`/orders?${params}`);
-      setOrders(response.items);
+      setOrders(user.role === "customer" ? customerVisibleOrders(response.items) : response.items);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Не удалось получить заказы");
     } finally {
@@ -48,11 +51,28 @@ export function OrdersScreen({ user }: { user: User | null }) {
     return () => window.clearTimeout(timer);
   }, [loadOrders]);
 
+  useEffect(
+    () => () => {
+      timers.current.forEach((timer) => window.clearTimeout(timer));
+    },
+    [],
+  );
+
   async function cancel(orderId: string) {
     setBusy(orderId);
     try {
       const updated = await apiRequest<Order>(`/orders/${orderId}/cancel`, { method: "POST" });
       setOrders((current) => current.map((order) => (order.id === orderId ? updated : order)));
+      if (user?.role === "customer") {
+        setNotice("Заказ отменён. Он исчезнет из списка в течение нескольких минут.");
+        timers.current.push(
+          window.setTimeout(
+            () => setOrders((current) => current.filter((order) => order.id !== orderId)),
+            2500,
+          ),
+          window.setTimeout(() => setNotice(""), 5500),
+        );
+      }
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Не удалось отменить заказ");
     } finally {
@@ -64,6 +84,10 @@ export function OrdersScreen({ user }: { user: User | null }) {
     return <div className="page-shell"><EmptyState icon="orders" title="Войдите, чтобы увидеть заказы" text="История доступна только владельцу аккаунта." /></div>;
   }
 
+  const filters = user.role === "customer"
+    ? FILTERS.filter((item) => item.value !== "cancelled")
+    : FILTERS;
+
   return (
     <div className="page-shell">
       <section className="page-heading split-heading">
@@ -73,7 +97,7 @@ export function OrdersScreen({ user }: { user: User | null }) {
           <p>Статусы отражают реальное состояние платежей и складских резервов.</p>
         </div>
         <div className="segmented" aria-label="Фильтр статуса">
-          {FILTERS.map((item) => (
+          {filters.map((item) => (
             <button
               className={filter === item.value ? "segment-active" : ""}
               key={item.value || "all"}
@@ -88,38 +112,41 @@ export function OrdersScreen({ user }: { user: User | null }) {
           ))}
         </div>
       </section>
+      {notice ? <div className="order-notice" role="status">{notice}</div> : null}
       {error ? <ErrorState message={error} retry={() => void loadOrders(filter)} /> : null}
       {loading ? (
         <LoadingBlock label="Загружаем заказы" />
       ) : orders.length === 0 ? (
-        <EmptyState icon="orders" title="Заказов пока нет" text="Новые заказы появятся здесь сразу после checkout." />
+        <EmptyState icon="orders" title="Заказов пока нет" text="Новые заказы появятся здесь сразу после оформления покупки." />
       ) : (
         <section className="orders-table card">
           <div className="table-head orders-grid">
-            <span>Заказ</span><span>Создан</span><span>Позиции</span><span>Статус</span><span>Сумма</span><span />
+            <span>Товар</span><span>Создан</span><span>Статус</span><span>Сумма</span><span />
           </div>
-          {orders.map((order) => (
-            <article className="table-row orders-grid" key={order.id}>
-              <div><strong>{order.order_number}</strong><small>{order.id.slice(0, 8)}</small></div>
-              <span>{formatDateTime(order.created_at)}</span>
-              <span>{order.items.reduce((sum, item) => sum + item.quantity, 0)}</span>
-              <StatusBadge status={order.status} />
-              <strong>{formatMoney(order.total_minor, order.currency)}</strong>
-              {order.status === "pending_payment" ? (
-                <button className="button button-secondary button-small" disabled={busy === order.id} onClick={() => void cancel(order.id)}>
-                  {busy === order.id ? "Отмена…" : "Отменить"}
-                </button>
-              ) : <span />}
-              <details className="order-details">
-                <summary>Состав заказа</summary>
-                <div>
-                  {order.items.map((item) => (
-                    <p key={item.id}><span>{item.product_name} × {item.quantity}</span><strong>{formatMoney(item.line_total_minor, item.currency)}</strong></p>
-                  ))}
-                </div>
-              </details>
-            </article>
-          ))}
+          {orders.map((order) => {
+            const product = orderProductSummary(order);
+            return (
+              <article className="table-row orders-grid" key={order.id}>
+                <div className="order-product"><strong>{product.title}</strong><small>{product.detail}</small></div>
+                <span>{formatDateTime(order.created_at)}</span>
+                <StatusBadge status={order.status} />
+                <strong>{formatMoney(order.total_minor, order.currency)}</strong>
+                {order.status === "pending_payment" ? (
+                  <button className="button button-secondary button-small" disabled={busy === order.id} onClick={() => void cancel(order.id)}>
+                    {busy === order.id ? "Отмена…" : "Отменить"}
+                  </button>
+                ) : <span />}
+                <details className="order-details">
+                  <summary>Состав заказа</summary>
+                  <div>
+                    {order.items.map((item) => (
+                      <p key={item.id}><span>{item.product_name} × {item.quantity}</span><strong>{formatMoney(item.line_total_minor, item.currency)}</strong></p>
+                    ))}
+                  </div>
+                </details>
+              </article>
+            );
+          })}
         </section>
       )}
     </div>
